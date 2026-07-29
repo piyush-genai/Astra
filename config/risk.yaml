@@ -1,0 +1,39 @@
+# Risk configuration — enforced by RiskManager and PositionManager at runtime.
+# Strategies never read or enforce these; the engine applies them uniformly.
+#
+# All monetary values in INR.
+
+per_trade:
+  # Maximum rupee loss allowed on a single position.
+  # For a long option: premium_paid × lot_size must be ≤ this.
+  # For a debit spread: net_debit × lot_size must be ≤ this.
+  max_loss_per_trade: 5000
+
+circuit_breaker:
+  # Once cumulative (realized + unrealized) loss for the session
+  # reaches or exceeds this amount, RiskManager halts ALL new orders
+  # for the remainder of the day. Resets at next session open.
+  daily_loss_limit: 15000
+
+concurrency:
+  # Maximum open positions on the same instrument at any time,
+  # regardless of which strategy(ies) generated the signals.
+  max_concurrent_positions_per_instrument: 1
+
+  # Maximum percentage of total allocated capital that can be
+  # deployed across ALL open positions simultaneously.
+  max_total_capital_deployed_pct: 50.0
+
+# Total capital this system is allowed to use.
+# Keep this strictly separate from other funds.
+allocated_capital: 200000
+
+# Algo-ID assigned by broker after strategy registration.
+# Mandatory since 1 April 2026 (Rule 9 in trading-risk-rules.md).
+# The engine will refuse to place orders if this is null/empty.
+algo_ids:
+  pivot_cpr_strategy: null   # fill in after registering with Upstox
+
+# Kill switch — flip to true via CLI or Telegram bot to halt all new orders immediately.
+# The engine polls this flag; it does NOT require a restart.
+kill_switch_active: false

@@ -1,0 +1,26 @@
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+
+# Environment / secrets — never commit these
+.env
+*.pem
+*.key
+config/credentials.yaml
+
+# Test / coverage output
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store

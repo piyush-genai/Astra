@@ -1,0 +1,39 @@
+# Instrument configuration — never hardcode these values in strategy or engine code.
+# Source: NSE circulars. Review and update whenever NSE issues a revision.
+#
+# Last reviewed: 2026-07
+# Nifty lot size revised to 75 effective June 2024, then 25 effective Nov 2024, then 75...
+# Confirm the current figure from NSE's contract specification before each expiry cycle.
+
+instruments:
+  NIFTY:
+    display_name: "Nifty 50"
+    underlying_symbol: "NSE_INDEX|Nifty 50"   # Upstox symbol format
+    option_symbol_prefix: "NSE_FO|NIFTY"
+    lot_size: 75              # ← VERIFY before each series rollover; subject to NSE revision
+    weekly_expiry_weekday: 1  # 0=Monday … 6=Sunday; 1=Tuesday as of Sept 2025
+    monthly_expiry_weekday: 3 # Thursday
+    tick_size: 0.05
+    strike_step: 50           # nearest OTM strike rounding
+    currency: INR
+
+  BANKNIFTY:
+    display_name: "Bank Nifty"
+    underlying_symbol: "NSE_INDEX|Nifty Bank"
+    option_symbol_prefix: "NSE_FO|BANKNIFTY"
+    lot_size: 30              # ← VERIFY before each series rollover
+    weekly_expiry_weekday: 2  # Wednesday
+    monthly_expiry_weekday: 3
+    tick_size: 0.05
+    strike_step: 100
+    currency: INR
+
+# Transaction cost assumptions (effective 1 April 2026 — Rule 13 in trading-risk-rules.md)
+# Review for further revisions periodically.
+transaction_costs:
+  stt_futures_pct: 0.05        # 0.05% on futures turnover
+  stt_options_pct: 0.15        # 0.15% on options premium + exercise
+  brokerage_per_order: 20.0    # flat ₹20 per order (Upstox default)
+  sebi_charges_pct: 0.0001
+  gst_pct: 18.0                # on brokerage + SEBI charges
+  stamp_duty_pct: 0.003        # on buy side only

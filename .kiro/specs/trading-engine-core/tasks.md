@@ -1,0 +1,21 @@
+# Tasks: Trading Engine Core
+
+- [ ] 1. Define `BaseStrategy` abstract class and `Signal` dataclass in `src/engine/base_strategy.py`
+- [ ] 2. Define `MarketData` structure (OHLC bar + any indicator context strategies need) used as the `evaluate()` input
+- [ ] 3. Implement `StrategyRegistry` — loads strategy classes listed in config, instantiates them, calls `evaluate()` per bar, catches and logs per-strategy exceptions without halting the run
+- [ ] 4. Implement `PositionManager` with the `(instrument, strategy_id, entry_time)`-keyed positions table and the two concurrency/capital checks from design.md
+  - [ ] 4a. Unit test: two signals on the same instrument, `max_concurrent_positions_per_instrument = 1` → second is rejected
+  - [ ] 4b. Unit test: same config with limit = 2 → second is accepted, tracked as a distinct position
+- [ ] 5. Implement `RiskManager` — pre-trade max-loss check, daily circuit breaker, kill switch flag
+  - [ ] 5a. Unit test: order with max loss above configured per-trade limit is rejected
+  - [ ] 5b. Unit test: simulated daily loss crossing the circuit-breaker threshold halts subsequent orders for the session
+  - [ ] 5c. Unit test: kill switch flag halts new orders regardless of circuit-breaker state
+- [ ] 6. Define `BrokerAdapter` interface in `src/broker/base_adapter.py`
+- [ ] 7. Implement `UpstoxAdapter` against Upstox's sandbox mode first, live mode gated behind explicit config flag (Upstox's data + order APIs are free, so no paid-plan gating is needed to start development, unlike Kite Connect)
+- [ ] 8. Implement `ExecutionEngine` — contract selection logic, max-loss computation, refusal of naked-short paths, order placement via `BrokerAdapter`, position recording via `PositionManager`
+  - [ ] 8a. Unit test: contract selection never returns a naked short leg as the sole position
+  - [ ] 8b. Unit test: max-loss computation matches hand-calculated expected value for a sample option premium/lot size
+- [ ] 9. Integration test: register two dummy strategies that both fire LONG signals on the same instrument in the same bar — verify registration order determines which is evaluated first and that Position Manager limits apply correctly across both
+- [ ] 10. Wire config loading for `config/instruments.yaml` (lot size, expiry weekday) and `config/risk.yaml` (risk %, circuit breaker threshold, concurrency limits) — no hardcoded literals permitted per steering rules
+- [ ] 11. Wire manual kill-switch trigger (CLI command minimum; Telegram bot integration optional at this stage)
+- [ ] 12. End-to-end dry run: historical data → Strategy Registry → Position Manager → Risk Manager → Execution Engine against Upstox's sandbox mode, confirm no live orders are placed until explicitly enabled
