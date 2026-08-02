@@ -1,65 +1,112 @@
 """
-PivotCprStrategy — Pivot + CPR Confluence on Nifty 15m.
+PivotCprStrategy — Pivot + CPR Confluence Breakout on Nifty.
 
-Implements the BaseStrategy interface. Evaluates each 15m bar for
-confluence of daily, weekly, and monthly pivot/CPR levels.
+Signal logic (fully specified — task 6 resolved):
+- Timeframe: 5-minute bars
+- Entry trigger:
+    Candle N  closes beyond a CONFLUENCE zone (2+ pivot levels)
+    Candle N+1 also closes beyond that same zone  (confirmation)
+    Entry at open of candle N+2
+- Direction:
+    Close above zone → LONG (buy Call)
+    Close below zone → SHORT (buy Put)
+- Initial stop:
+    LONG:  min(zone.price_low, candle_N.low)
+    SHORT: max(zone.price_high, candle_N.high)
+- Trailing stop (after 2 post-entry candles have closed):
+    Ratchet stop to low (long) / high (short) of candle 2 bars back.
+    Never loosens. Checked intrabar — if violated inside a candle,
+    exit immediately without waiting for close.
+- Structural invalidation:
+    If any candle CLOSES back on the wrong side of the broken zone,
+    exit immediately regardless of stop level.
+- Target:
+    Next confluence zone in the direction of trade. Informational only —
+    NOT an auto-exit. Scaling decisions are the execution layer's concern.
 
-Stage 1 (tasks 1–5 of pivot-cpr-strategy spec):
-  Indicator computation + zone detection + monthly bias — logged, no Signal emitted.
-
-Stage 2 (task 7 — BLOCKED until task 6 operator input):
-  Full Signal emission after the exact entry trigger and session filter are specified.
-
-See .kiro/specs/pivot-cpr-strategy/requirements.md for the full spec.
+See src/data/indicators.py for zone detection and pivot formulas.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Optional
 
 import pandas as pd
 
 from src.data.indicators import (
-    CPR,
-    PivotSet,
-    compute_cpr,
-    compute_pivot_set,
-    get_prior_period_hlc,
-    group_levels_into_zones,
-    resample_to_daily,
-    resample_to_monthly,
-    resample_to_weekly,
-    zone_midpoint,
+    Zone,
+    build_pivot_table,
+    find_zones,
+    zone_above,
+    zone_below,
 )
 from src.engine.base_strategy import BaseStrategy, MarketData, Signal, SignalDirection
 
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Internal signal state (pending confirmation across bars)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _Pending:
+    """A breakout that has fired but not yet been confirmed."""
+    direction: SignalDirection
+    breakout_bar: pd.Timestamp
+    zone: Zone
+    breakout_candle_low: float   # for initial stop calculation
+    breakout_candle_high: float
+
+
+@dataclass
+class TradeSetup:
+    """
+    Fully confirmed setup ready for the execution layer.
+    Returned inside Signal.metadata so ExecutionEngine can use it.
+    """
+    direction: SignalDirection
+    breakout_time: pd.Timestamp
+    confirm_time: pd.Timestamp
+    entry_time: pd.Timestamp
+    entry_price: float          # open of candle N+2 (approximate at signal time)
+    zone: Zone
+    initial_stop: float
+    target_zone: Optional[Zone]
+
+
+# ---------------------------------------------------------------------------
+# Strategy
+# ---------------------------------------------------------------------------
+
 class PivotCprStrategy(BaseStrategy):
     """
-    Nifty 50 / 15-minute Pivot + CPR confluence strategy.
+    Nifty 5-minute Pivot + CPR Confluence Breakout strategy.
 
     Config keys:
-        confluence_tolerance_pct (float): tolerance for grouping levels into zones.
-            Default 0.15. Marked TBD/calibratable in the spec — do not treat as final.
-        min_levels_for_confluence (int): minimum number of levels in a zone
-            to consider it a valid confluence zone. Default 2.
+        tolerance_pct (float):       zone grouping tolerance in %.
+                                     Default 0.18. Calibrate via backtest.
+        min_levels_for_confluence (int): min levels to call a zone confluent.
+                                     Default 2.
     """
 
     STRATEGY_ID = "pivot_cpr_strategy"
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        # Read from config — never hardcoded.
-        self._tolerance_pct: float = float(config.get("confluence_tolerance_pct", 0.15))
+        self._tolerance_pct: float = float(config.get("tolerance_pct", 0.18))
         self._min_levels: int = int(config.get("min_levels_for_confluence", 2))
+
+        # Rolling state across bars.
+        self._pending: Optional[_Pending] = None
+        self._pivot_table: Optional[pd.DataFrame] = None
+        self._pivot_table_date: Optional[pd.Timestamp] = None
 
         logger.info(
             "PivotCprStrategy initialised | tolerance=%.3f%% | min_levels=%d",
-            self._tolerance_pct,
-            self._min_levels,
+            self._tolerance_pct, self._min_levels,
         )
 
     # ------------------------------------------------------------------
@@ -68,178 +115,181 @@ class PivotCprStrategy(BaseStrategy):
 
     def evaluate(self, market_data: MarketData) -> Optional[Signal]:
         """
-        Stage 1: compute indicators, detect zones, log. No Signal emitted yet.
-        Stage 2 is BLOCKED — see task 6 in the spec.
+        Evaluate one 5-minute bar.
+
+        Returns a Signal on the bar where the setup is confirmed
+        (i.e. the confirmation candle, N+1 — the engine enters at N+2's open).
+        Returns None otherwise.
         """
         history = market_data.history
         if history is None or len(history) < 2:
-            logger.debug("PivotCprStrategy: insufficient history at %s", market_data.bar_time)
             return None
-
-        bar_time: pd.Timestamp = market_data.bar_time
-
-        # ── Resample to daily / weekly / monthly ──────────────────────────
-        daily_df = resample_to_daily(history)
-        weekly_df = resample_to_weekly(history)
-        monthly_df = resample_to_monthly(history)
-
-        # ── Prior-period H/L/C ────────────────────────────────────────────
-        d_hlc = get_prior_period_hlc(daily_df, as_of=bar_time)
-        w_hlc = get_prior_period_hlc(weekly_df, as_of=bar_time)
-        m_hlc = get_prior_period_hlc(monthly_df, as_of=bar_time)
-
-        if d_hlc is None or w_hlc is None or m_hlc is None:
-            logger.debug(
-                "PivotCprStrategy: missing prior-period data at %s "
-                "(d=%s w=%s m=%s)",
-                bar_time,
-                d_hlc is not None,
-                w_hlc is not None,
-                m_hlc is not None,
-            )
-            return None
-
-        # ── Compute pivot sets and CPRs ───────────────────────────────────
-        daily_pivots = compute_pivot_set(*d_hlc, period="daily")
-        weekly_pivots = compute_pivot_set(*w_hlc, period="weekly")
-        monthly_pivots = compute_pivot_set(*m_hlc, period="monthly")
-
-        daily_cpr = compute_cpr(*d_hlc, period="daily")
-        weekly_cpr = compute_cpr(*w_hlc, period="weekly")
-        monthly_cpr = compute_cpr(*m_hlc, period="monthly")
-
-        # ── Monthly bias ──────────────────────────────────────────────────
-        # Monthly PP acts as a bias reference only — excluded from zone grouping.
-        monthly_bias = _compute_monthly_bias(market_data.close, monthly_pivots.P)
-
-        # ── Collect levels for confluence (exclude monthly PP from grouping) ──
-        levels_for_confluence = _collect_levels(
-            daily_pivots, weekly_pivots, daily_cpr, weekly_cpr
-        )
-
-        # ── Group into confluence zones ───────────────────────────────────
-        zones = group_levels_into_zones(levels_for_confluence, self._tolerance_pct)
-        strong_zones = [z for z in zones if len(z) >= self._min_levels]
-
-        logger.debug(
-            "PivotCprStrategy [%s] | close=%.2f | bias=%s | "
-            "%d confluence zones (%d strong) | "
-            "daily_PP=%.2f | daily_CPR=[%.2f-%.2f]",
-            bar_time,
-            market_data.close,
-            monthly_bias,
-            len(zones),
-            len(strong_zones),
-            daily_pivots.P,
-            daily_cpr.BC,
-            daily_cpr.TC,
-        )
-
-        # ── Stage 2 — BLOCKED ─────────────────────────────────────────────
-        # Entry trigger and session filter not yet specified by operator.
-        # See .kiro/specs/pivot-cpr-strategy/tasks.md task 6.
-        # Do NOT implement signal emission here until task 6 is resolved.
-
-        return None  # Stage 1 only — no signals yet.
-
-    # ------------------------------------------------------------------
-    # Debug / introspection (used by Stage 2 and backtest harness)
-    # ------------------------------------------------------------------
-
-    def compute_state(self, market_data: MarketData) -> dict:
-        """
-        Return the full indicator state for a bar without emitting a Signal.
-        Used by the backtest harness and for debugging.
-        """
-        # Re-run the same logic as evaluate() but return structured output.
-        history = market_data.history
-        if history is None or len(history) < 2:
-            return {}
 
         bar_time = market_data.bar_time
-        daily_df = resample_to_daily(history)
-        weekly_df = resample_to_weekly(history)
-        monthly_df = resample_to_monthly(history)
+        close    = market_data.close
 
-        d_hlc = get_prior_period_hlc(daily_df, as_of=bar_time)
-        w_hlc = get_prior_period_hlc(weekly_df, as_of=bar_time)
-        m_hlc = get_prior_period_hlc(monthly_df, as_of=bar_time)
+        # ── Rebuild pivot table once per day ─────────────────────────────────
+        today = bar_time.normalize()
+        if self._pivot_table is None or today != self._pivot_table_date:
+            self._pivot_table = self._build_pivots(history, today)
+            self._pivot_table_date = today
+            self._pending = None   # reset pending on day change
 
-        if not all([d_hlc, w_hlc, m_hlc]):
-            return {}
+        if self._pivot_table is None:
+            return None
 
-        daily_pivots = compute_pivot_set(*d_hlc, period="daily")
-        weekly_pivots = compute_pivot_set(*w_hlc, period="weekly")
-        monthly_pivots = compute_pivot_set(*m_hlc, period="monthly")
-        daily_cpr = compute_cpr(*d_hlc, period="daily")
-        weekly_cpr = compute_cpr(*w_hlc, period="weekly")
-        monthly_cpr = compute_cpr(*m_hlc, period="monthly")
+        # ── Get today's zones ─────────────────────────────────────────────────
+        if today not in self._pivot_table.index:
+            return None
 
-        monthly_bias = _compute_monthly_bias(market_data.close, monthly_pivots.P)
-        levels = _collect_levels(daily_pivots, weekly_pivots, daily_cpr, weekly_cpr)
-        zones = group_levels_into_zones(levels, self._tolerance_pct)
-        strong_zones = [z for z in zones if len(z) >= self._min_levels]
+        zones = find_zones(
+            self._pivot_table.loc[today],
+            tolerance_pct=self._tolerance_pct,
+        )
+        confluence_zones = [z for z in zones if z.is_confluence]
 
-        return {
-            "bar_time": bar_time,
-            "close": market_data.close,
-            "monthly_bias": monthly_bias,
-            "monthly_PP": monthly_pivots.P,
-            "daily_pivots": daily_pivots,
-            "weekly_pivots": weekly_pivots,
-            "daily_cpr": daily_cpr,
-            "weekly_cpr": weekly_cpr,
-            "monthly_cpr": monthly_cpr,
-            "all_zones": zones,
-            "strong_zones": strong_zones,
-            "strong_zone_midpoints": [zone_midpoint(z) for z in strong_zones],
-        }
+        # ── State machine: no pending → look for breakout ─────────────────────
+        if self._pending is None:
+            # Get the previous bar's close from history to detect a crossing.
+            if history is not None and len(history) >= 2:
+                prev_close = float(history.iloc[-2]["close"]) if "close" in history.columns else None
+            else:
+                prev_close = None
 
+            for z in confluence_zones:
+                # A breakout requires price to have CROSSED the zone boundary,
+                # not merely to be on one side of it (prevents false triggers
+                # when price starts the day already far from the zone).
+                broke_up   = (close > z.price_high and
+                              prev_close is not None and prev_close <= z.price_high)
+                broke_down = (close < z.price_low and
+                              prev_close is not None and prev_close >= z.price_low)
 
-# ---------------------------------------------------------------------------
-# Module-level helpers (pure functions)
-# ---------------------------------------------------------------------------
+                if broke_up:
+                    self._pending = _Pending(
+                        direction=SignalDirection.LONG,
+                        breakout_bar=bar_time,
+                        zone=z,
+                        breakout_candle_low=market_data.low,
+                        breakout_candle_high=market_data.high,
+                    )
+                    logger.debug(
+                        "Breakout UP through zone [%.2f-%.2f] at %s",
+                        z.price_low, z.price_high, bar_time,
+                    )
+                    break
 
-def _compute_monthly_bias(current_price: float, monthly_pp: float) -> str:
-    """
-    Monthly bias based on price relative to monthly pivot.
+                if broke_down:
+                    self._pending = _Pending(
+                        direction=SignalDirection.SHORT,
+                        breakout_bar=bar_time,
+                        zone=z,
+                        breakout_candle_low=market_data.low,
+                        breakout_candle_high=market_data.high,
+                    )
+                    logger.debug(
+                        "Breakout DOWN through zone [%.2f-%.2f] at %s",
+                        z.price_low, z.price_high, bar_time,
+                    )
+                    break
 
-    Returns "BULLISH" if price > monthly PP, "BEARISH" if below, "NEUTRAL" if equal.
-    Monthly PP is used as a bias reference only — it is excluded from
-    confluence-zone grouping (see spec design.md).
-    """
-    if current_price > monthly_pp:
-        return "BULLISH"
-    elif current_price < monthly_pp:
-        return "BEARISH"
-    return "NEUTRAL"
+            return None  # breakout bar itself never emits a signal
 
+        # ── Pending → check confirmation ──────────────────────────────────────
+        p = self._pending
+        confirmed = (
+            close > p.zone.price_high if p.direction == SignalDirection.LONG
+            else close < p.zone.price_low
+        )
 
-def _collect_levels(
-    daily_pivots: PivotSet,
-    weekly_pivots: PivotSet,
-    daily_cpr: CPR,
-    weekly_cpr: CPR,
-) -> list[float]:
-    """
-    Flatten pivot and CPR levels into a single list for confluence grouping.
+        if not confirmed:
+            # Closed back inside or on wrong side — setup cancelled.
+            logger.debug(
+                "Breakout at %s cancelled — confirmation failed at %s",
+                p.breakout_bar, bar_time,
+            )
+            self._pending = None
+            return None
 
-    Monthly PP is intentionally excluded — it is used for bias only.
-    Monthly R/S levels and BC/TC are also excluded to keep the zone set
-    focused on the most actively-watched intraday levels.
-    Adjust this set based on backtesting results.
-    """
-    return [
-        # Daily pivots
-        daily_pivots.P,
-        daily_pivots.R1, daily_pivots.R2, daily_pivots.R3,
-        daily_pivots.S1, daily_pivots.S2, daily_pivots.S3,
-        # Daily CPR
-        daily_cpr.BC, daily_cpr.TC,
-        # Weekly pivots
-        weekly_pivots.P,
-        weekly_pivots.R1, weekly_pivots.R2,
-        weekly_pivots.S1, weekly_pivots.S2,
-        # Weekly CPR
-        weekly_cpr.BC, weekly_cpr.TC,
-    ]
+        # ── Confirmed — build the setup and emit a Signal ─────────────────────
+        if p.direction == SignalDirection.LONG:
+            initial_stop = min(p.zone.price_low, p.breakout_candle_low)
+            target = zone_above(zones, p.zone.price_high)
+        else:
+            initial_stop = max(p.zone.price_high, p.breakout_candle_high)
+            target = zone_below(zones, p.zone.price_low)
+
+        setup = TradeSetup(
+            direction=p.direction,
+            breakout_time=p.breakout_bar,
+            confirm_time=bar_time,
+            entry_time=bar_time,   # engine enters at next bar's open
+            entry_price=market_data.close,
+            zone=p.zone,
+            initial_stop=initial_stop,
+            target_zone=target,
+        )
+
+        logger.info(
+            "Signal confirmed | %s | zone=[%.2f-%.2f] | stop=%.2f | target=%s",
+            p.direction,
+            p.zone.price_low, p.zone.price_high,
+            initial_stop,
+            f"[{target.price_low:.2f}-{target.price_high:.2f}]" if target else "none",
+        )
+
+        self._pending = None
+
+        return Signal(
+            strategy_id=self.STRATEGY_ID,
+            instrument=market_data.instrument,
+            direction=p.direction,
+            bar_time=bar_time,
+            metadata={"setup": setup},
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _build_pivots(
+        self,
+        history: pd.DataFrame,
+        today: pd.Timestamp,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Build the daily pivot table from intraday history.
+
+        history is 5-min bars; resample to daily OHLC first.
+        Returns None if there isn't enough daily history.
+        """
+        history = history.copy()
+        history.columns = [c.lower() for c in history.columns]
+
+        daily = history.resample("D").agg(
+            open=("open", "first"),
+            high=("high", "max"),
+            low=("low", "min"),
+            close=("close", "last"),
+        ).dropna(subset=["open"])
+
+        # Need at least 2 daily rows (yesterday + today stub) to have
+        # a valid prior-day row after .shift(1).
+        if len(daily) < 2:
+            logger.debug("Insufficient daily history to build pivot table.")
+            return None
+
+        # Ensure today is included so pivot_table.loc[today] works.
+        if today not in daily.index:
+            # Add a placeholder row for today using the latest intraday bar.
+            today_bars = history[history.index.normalize() == today]
+            if not today_bars.empty:
+                daily.loc[today] = {
+                    "open":  today_bars["open"].iloc[0],
+                    "high":  today_bars["high"].max(),
+                    "low":   today_bars["low"].min(),
+                    "close": today_bars["close"].iloc[-1],
+                }
+                daily = daily.sort_index()
+
+        return build_pivot_table(daily)

@@ -1,249 +1,208 @@
 """
 Shared indicator formula library.
 
+Implements:
+- Classic floor-trader pivot points (Daily / Weekly / Monthly)
+- Central Pivot Range (Daily)
+- build_pivot_table(): no-look-ahead pivot table from daily OHLC
+- Confluence zone detection
+
+Formulas match CM_Pivots_Filtered (Filtered OFF, D/W/M enabled) and
+CD_PivotR exactly as configured in the TradingView chart settings.
+
 Rules:
 - All formulas implemented directly with pandas/numpy arithmetic.
-- No black-box TA libraries (e.g. ta-lib, pandas-ta) for these formulas.
-- The exact pivot and CPR formulas are the authoritative source of truth;
-  unit tests in tests/strategies/test_indicators.py verify against
-  hand-computed sample values from the spec.
+- No black-box TA libraries.
+- Unit tests in tests/strategies/test_indicators.py verify against
+  hand-computed values.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 
 # ---------------------------------------------------------------------------
-# Data structures
+# Core pivot formulas
 # ---------------------------------------------------------------------------
+
+def classic_pivot(high: float, low: float, close: float) -> dict:
+    """
+    Standard floor-trader pivot points.
+    P, R1, S1, R2, S2 — confirmed formula (Filtered toggle OFF).
+    """
+    p = (high + low + close) / 3.0
+    return {
+        "P":  p,
+        "R1": 2 * p - low,
+        "S1": 2 * p - high,
+        "R2": p + (high - low),
+        "S2": p - (high - low),
+    }
+
+
+def cpr(high: float, low: float, close: float) -> dict:
+    """Central Pivot Range — matches CD_PivotR (Daily only)."""
+    p  = (high + low + close) / 3.0
+    bc = (high + low) / 2.0
+    tc = 2 * p - bc
+    if tc < bc:
+        tc, bc = bc, tc
+    return {"P": p, "BC": bc, "TC": tc, "width": abs(tc - bc)}
+
+
+def _pivot_frame(ohlc: pd.DataFrame, formula) -> pd.DataFrame:
+    """
+    Apply a pivot formula row-wise to a frame with columns
+    [high, low, close], returning one output column per level.
+    NaN rows (from .shift()) are passed through as NaN rows.
+    """
+    records = []
+    for r in ohlc.itertuples():
+        if pd.isna(r.high):
+            records.append({k: float("nan") for k in formula(0, 0, 0)})
+        else:
+            records.append(formula(r.high, r.low, r.close))
+    return pd.DataFrame(records, index=ohlc.index)
+
+
+# ---------------------------------------------------------------------------
+# No-look-ahead pivot table builder
+# ---------------------------------------------------------------------------
+
+def build_pivot_table(daily_ohlc: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build a daily pivot table with no look-ahead bias.
+
+    Args:
+        daily_ohlc: DataFrame indexed by trading date (DatetimeIndex),
+                    columns [open, high, low, close] — one row per Nifty
+                    session, real trading days only (holidays simply absent).
+
+    Returns:
+        One row per trading day with every level "live" that day:
+        daily_P/R1/R2/S1/S2, weekly_*, monthly_*, cpr_P/BC/TC/width.
+
+    Implementation notes:
+    - Daily:   .shift(1) on the raw frame → yesterday's close drives today's levels.
+    - Weekly:  group by W-FRI period, .shift(1) on the period frame, reindex back
+               to daily. Every trading day in week W gets week W-1's levels.
+    - Monthly: same pattern with month-end periods.
+    - Grouping uses to_period() so holidays inside a week/month don't create
+      phantom partial periods.
+    """
+    df = daily_ohlc[["high", "low", "close"]].copy()
+    df.columns = [c.lower() for c in df.columns]
+
+    # ── Daily ────────────────────────────────────────────────────────────────
+    daily     = _pivot_frame(df.shift(1), classic_pivot).add_prefix("daily_")
+    daily_cpr = _pivot_frame(df.shift(1), cpr).add_prefix("cpr_")
+
+    # ── Weekly ───────────────────────────────────────────────────────────────
+    week_key    = df.index.to_period("W-FRI")
+    weekly_ohlc = df.groupby(week_key).agg(
+        high=("high", "max"), low=("low", "min"), close=("close", "last")
+    )
+    weekly_prev = weekly_ohlc.shift(1)
+    weekly_piv  = _pivot_frame(weekly_prev, classic_pivot).add_prefix("weekly_")
+    weekly      = weekly_piv.reindex(week_key).set_axis(df.index)
+
+    # ── Monthly ──────────────────────────────────────────────────────────────
+    month_key    = df.index.to_period("M")
+    monthly_ohlc = df.groupby(month_key).agg(
+        high=("high", "max"), low=("low", "min"), close=("close", "last")
+    )
+    monthly_prev = monthly_ohlc.shift(1)
+    monthly_piv  = _pivot_frame(monthly_prev, classic_pivot).add_prefix("monthly_")
+    monthly      = monthly_piv.reindex(month_key).set_axis(df.index)
+
+    return pd.concat([daily, weekly, monthly, daily_cpr], axis=1)
+
+
+# ---------------------------------------------------------------------------
+# Confluence zone detection
+# ---------------------------------------------------------------------------
+
+# Every level column produced by build_pivot_table() that counts as
+# "a line on the chart" for confluence purposes.
+LEVEL_COLUMNS = [
+    "daily_R2",  "daily_R1",  "daily_P",  "daily_S1",  "daily_S2",
+    "weekly_R2", "weekly_R1", "weekly_P", "weekly_S1", "weekly_S2",
+    "monthly_R2","monthly_R1","monthly_P","monthly_S1","monthly_S2",
+    "cpr_TC", "cpr_P", "cpr_BC",
+]
+
 
 @dataclass
-class PivotSet:
+class Zone:
+    price_low:  float
+    price_high: float
+    members:    list = field(default_factory=list)  # pivot level names in this zone
+    anchor:     float = 0.0   # first (lowest) member price — used for tolerance check
+
+    @property
+    def center(self) -> float:
+        return (self.price_low + self.price_high) / 2
+
+    @property
+    def is_confluence(self) -> bool:
+        """True when 2+ independent levels cluster together."""
+        return len(self.members) >= 2
+
+
+def find_zones(
+    day_levels: pd.Series,
+    tolerance_pct: float = 0.18,   # expressed as %, e.g. 0.18 = 0.18%
+) -> list[Zone]:
     """
-    Standard floor-pivot levels computed from a single prior period's H/L/C.
-
-    P  = (H + L + C) / 3
-    R1 = 2P - L
-    S1 = 2P - H
-    R2 = P + (H - L)
-    S2 = P - (H - L)
-    R3 = H + 2(P - L)
-    S3 = L - 2(H - P)
-    """
-    period: str        # e.g. "daily", "weekly", "monthly"
-    P: float
-    R1: float
-    S1: float
-    R2: float
-    S2: float
-    R3: float
-    S3: float
-
-
-@dataclass
-class CPR:
-    """
-    Central Pivot Range: three levels derived from the prior period's H/L/C.
-
-    BC  = (H + L + C) / 3 - (H + L) / 2     ... bottom of CPR
-    TC  = (H + L + C) / 3 - BC + (H+L+C)/3  ... top of CPR
-    PP  = (H + L + C) / 3                    ... pivot (= BC's reference)
-
-    Simplified standard formulas:
-        PP  = (H + L + C) / 3
-        BC  = (H + L) / 2
-        TC  = PP - BC + PP  = 2*PP - BC
-    """
-    period: str
-    PP: float     # central pivot = (H+L+C)/3
-    BC: float     # bottom of CPR = (H+L)/2
-    TC: float     # top of CPR   = 2*PP - BC
-
-
-# ---------------------------------------------------------------------------
-# Core formula functions
-# ---------------------------------------------------------------------------
-
-def compute_pivot_set(high: float, low: float, close: float, period: str = "daily") -> PivotSet:
-    """
-    Compute standard floor-pivot levels from prior-period H/L/C.
+    Cluster all pivot levels active on a given day into confluence zones.
 
     Args:
-        high, low, close: Prior period's High, Low, Close.
-        period: Label only ("daily", "weekly", "monthly").
+        day_levels:    One row from build_pivot_table() output.
+        tolerance_pct: Levels within this % of the zone anchor are grouped
+                       together. 0.18% (~32 pts on Nifty at 18000) is the
+                       starting value — calibrate against backtest results.
 
     Returns:
-        PivotSet with P, R1-R3, S1-S3.
+        List of Zone objects sorted low-to-high.
+
+    Note: new members are compared against the zone's ANCHOR (its first/
+    lowest member), not against the running edge — prevents tolerance
+    chaining stretching a zone wider than intended.
     """
-    P = (high + low + close) / 3.0
-    R1 = 2 * P - low
-    S1 = 2 * P - high
-    R2 = P + (high - low)
-    S2 = P - (high - low)
-    R3 = high + 2 * (P - low)
-    S3 = low - 2 * (high - P)
-    return PivotSet(period=period, P=P, R1=R1, S1=S1, R2=R2, S2=S2, R3=R3, S3=S3)
-
-
-def compute_cpr(high: float, low: float, close: float, period: str = "daily") -> CPR:
-    """
-    Compute the Central Pivot Range from prior-period H/L/C.
-
-    Args:
-        high, low, close: Prior period's High, Low, Close.
-        period: Label only.
-
-    Returns:
-        CPR with PP, BC (bottom), TC (top).
-    """
-    PP = (high + low + close) / 3.0
-    BC = (high + low) / 2.0
-    TC = 2 * PP - BC
-    # Ensure TC >= BC (they can coincide if H==C or L==C on a doji-like candle)
-    if TC < BC:
-        TC, BC = BC, TC
-    return CPR(period=period, PP=PP, BC=BC, TC=TC)
-
-
-# ---------------------------------------------------------------------------
-# Resampling helpers
-# ---------------------------------------------------------------------------
-
-def resample_to_daily(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Resample an intraday OHLCV DataFrame to daily OHLCV.
-
-    Args:
-        df: DataFrame with DatetimeIndex (timezone-aware recommended),
-            columns: open, high, low, close, volume (case-insensitive).
-
-    Returns:
-        Daily OHLCV DataFrame.
-    """
-    df = _normalize_columns(df)
-    daily = df.resample("D").agg(
-        open=("open", "first"),
-        high=("high", "max"),
-        low=("low", "min"),
-        close=("close", "last"),
-        volume=("volume", "sum"),
-    ).dropna(subset=["open"])
-    return daily
-
-
-def resample_to_weekly(df: pd.DataFrame) -> pd.DataFrame:
-    """Resample intraday OHLCV to weekly (week ending Friday)."""
-    df = _normalize_columns(df)
-    weekly = df.resample("W-FRI").agg(
-        open=("open", "first"),
-        high=("high", "max"),
-        low=("low", "min"),
-        close=("close", "last"),
-        volume=("volume", "sum"),
-    ).dropna(subset=["open"])
-    return weekly
-
-
-def resample_to_monthly(df: pd.DataFrame) -> pd.DataFrame:
-    """Resample intraday OHLCV to monthly (month-end)."""
-    df = _normalize_columns(df)
-    monthly = df.resample("ME").agg(
-        open=("open", "first"),
-        high=("high", "max"),
-        low=("low", "min"),
-        close=("close", "last"),
-        volume=("volume", "sum"),
-    ).dropna(subset=["open"])
-    return monthly
-
-
-def get_prior_period_hlc(
-    resampled_df: pd.DataFrame,
-    as_of: pd.Timestamp,
-) -> tuple[float, float, float] | None:
-    """
-    Return (high, low, close) for the period immediately preceding as_of.
-
-    Args:
-        resampled_df: daily/weekly/monthly OHLCV DataFrame.
-        as_of: the current bar's timestamp; we want the period before this.
-
-    Returns:
-        (high, low, close) tuple, or None if insufficient history.
-    """
-    prior = resampled_df[resampled_df.index < as_of]
-    if prior.empty:
-        return None
-    row = prior.iloc[-1]
-    return float(row["high"]), float(row["low"]), float(row["close"])
-
-
-# ---------------------------------------------------------------------------
-# Confluence detection helpers
-# ---------------------------------------------------------------------------
-
-def group_levels_into_zones(
-    levels: list[float],
-    tolerance_pct: float,
-) -> list[list[float]]:
-    """
-    Group a flat list of price levels into confluence zones.
-
-    Two levels are considered confluent if they are within `tolerance_pct`
-    percent of each other (relative to their average).
-
-    Args:
-        levels: unsorted list of price levels.
-        tolerance_pct: e.g. 0.15 means ±0.15% = 0.0015 in fractional terms.
-
-    Returns:
-        List of groups (each group is a list of confluent levels).
-        Groups are sorted by ascending average price.
-    """
-    if not levels:
-        return []
-
-    sorted_levels = sorted(levels)
     tolerance = tolerance_pct / 100.0
 
-    groups: list[list[float]] = []
-    current_group = [sorted_levels[0]]
+    values = sorted(
+        (day_levels[col], col)
+        for col in LEVEL_COLUMNS
+        if col in day_levels.index and pd.notna(day_levels[col])
+    )
 
-    for lvl in sorted_levels[1:]:
-        ref = np.mean(current_group)
-        if abs(lvl - ref) / ref <= tolerance:
-            current_group.append(lvl)
+    zones: list[Zone] = []
+    for price, name in values:
+        if zones and price <= zones[-1].anchor * (1 + tolerance):
+            zones[-1].price_high = max(zones[-1].price_high, price)
+            zones[-1].members.append(name)
         else:
-            groups.append(current_group)
-            current_group = [lvl]
-
-    groups.append(current_group)
-    return groups
-
-
-def zone_midpoint(group: list[float]) -> float:
-    """Return the average (midpoint) price of a confluence zone."""
-    return float(np.mean(group))
+            zones.append(Zone(
+                price_low=price,
+                price_high=price,
+                members=[name],
+                anchor=price,
+            ))
+    return zones
 
 
-def zone_width_pct(group: list[float]) -> float:
-    """Return the width of a confluence zone as % of its midpoint."""
-    if len(group) < 2:
-        return 0.0
-    mid = zone_midpoint(group)
-    return (max(group) - min(group)) / mid * 100.0
+def zone_above(zones: list[Zone], price: float) -> Optional[Zone]:
+    """Return the nearest zone whose low is above price."""
+    above = [z for z in zones if z.price_low > price]
+    return min(above, key=lambda z: z.price_low) if above else None
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Lowercase column names so callers don't need to worry about casing."""
-    df = df.copy()
-    df.columns = [c.lower() for c in df.columns]
-    return df
+def zone_below(zones: list[Zone], price: float) -> Optional[Zone]:
+    """Return the nearest zone whose high is below price."""
+    below = [z for z in zones if z.price_high < price]
+    return max(below, key=lambda z: z.price_high) if below else None
