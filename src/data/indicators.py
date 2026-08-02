@@ -102,7 +102,10 @@ def build_pivot_table(daily_ohlc: pd.DataFrame) -> pd.DataFrame:
     daily_cpr = _pivot_frame(df.shift(1), cpr).add_prefix("cpr_")
 
     # ── Weekly ───────────────────────────────────────────────────────────────
-    week_key    = df.index.to_period("W-FRI")
+    # Strip timezone before to_period() to avoid the "will drop timezone" warning;
+    # we restore the original index when reindexing back.
+    tz_naive_index = df.index.tz_localize(None) if df.index.tz is None else df.index.tz_convert(None)
+    week_key    = tz_naive_index.to_period("W-FRI")
     weekly_ohlc = df.groupby(week_key).agg(
         high=("high", "max"), low=("low", "min"), close=("close", "last")
     )
@@ -111,7 +114,7 @@ def build_pivot_table(daily_ohlc: pd.DataFrame) -> pd.DataFrame:
     weekly      = weekly_piv.reindex(week_key).set_axis(df.index)
 
     # ── Monthly ──────────────────────────────────────────────────────────────
-    month_key    = df.index.to_period("M")
+    month_key    = tz_naive_index.to_period("M")
     monthly_ohlc = df.groupby(month_key).agg(
         high=("high", "max"), low=("low", "min"), close=("close", "last")
     )

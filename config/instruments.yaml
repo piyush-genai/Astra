@@ -10,7 +10,7 @@ instruments:
     display_name: "Nifty 50"
     underlying_symbol: "NSE_INDEX|Nifty 50"   # Upstox symbol format
     option_symbol_prefix: "NSE_FO|NIFTY"
-    lot_size: 75              # ← VERIFY before each series rollover; subject to NSE revision
+    lot_size: 65              # ← NSE revised to 65 from Jan 2026; VERIFY before each series rollover
     weekly_expiry_weekday: 1  # 0=Monday … 6=Sunday; 1=Tuesday as of Sept 2025
     monthly_expiry_weekday: 3 # Thursday
     tick_size: 0.05
