@@ -46,6 +46,7 @@ class Trade:
 class BacktestResult:
     signals: list[Signal] = field(default_factory=list)
     trades: list[Trade] = field(default_factory=list)
+    suppressed_signals: list[dict] = field(default_factory=list)  # NEW: track why signals didn't trade
     equity_curve: Optional[pd.Series] = None
     metrics: dict = field(default_factory=dict)
 
@@ -100,10 +101,12 @@ class BacktestHarness:
         strategy: BaseStrategy,
         instruments_config: dict,
         history_window: int = 100,
+        cooldown_minutes: int = 45,
     ) -> None:
         self._strategy = strategy
         self._instruments = instruments_config
         self._history_window = history_window
+        self._cooldown_minutes = cooldown_minutes
 
     def run(self, ohlcv: pd.DataFrame) -> BacktestResult:
         ohlcv = ohlcv.copy()
@@ -117,6 +120,10 @@ class BacktestHarness:
         entry_time:    Optional[pd.Timestamp] = None
         current_stop:  Optional[float]      = None
         bars_in_trade: int                  = 0
+
+        # Zone cooldown tracking
+        last_exit_zone: Optional[tuple]     = None
+        last_exit_time: Optional[pd.Timestamp] = None
 
         for i in range(self._history_window, len(ohlcv)):
             bar      = ohlcv.iloc[i]
@@ -186,6 +193,11 @@ class BacktestHarness:
                         "EXIT %s | entry=%.2f exit=%.2f pnl=%.2f pts | reason=%s | %s",
                         direction, entry_price, exit_price, trade.pnl_points, exit_reason, bar_time,
                     )
+                    
+                    # Record zone for cooldown tracking
+                    last_exit_zone = (round(zone.price_low, 2), round(zone.price_high, 2))
+                    last_exit_time = bar_time
+                    
                     active_signal = None
                     entry_price   = None
                     entry_time    = None
@@ -217,6 +229,31 @@ class BacktestHarness:
                 # One trade at a time — only enter if flat.
                 if active_signal is None:
                     setup = signal.metadata["setup"]
+                    zone  = setup.zone
+                    zone_key = (round(zone.price_low, 2), round(zone.price_high, 2))
+                    
+                    # Check if this zone is still in cooldown after a recent exit
+                    in_cooldown = (
+                        last_exit_zone == zone_key 
+                        and last_exit_time is not None
+                        and (bar_time - last_exit_time) < pd.Timedelta(minutes=self._cooldown_minutes)
+                    )
+                    
+                    if in_cooldown:
+                        logger.debug(
+                            "Signal %s at %s suppressed — zone %s still in cooldown (exited %s)",
+                            signal.direction, bar_time, zone_key, last_exit_time,
+                        )
+                        result.suppressed_signals.append({
+                            "signal_time":   str(bar_time),
+                            "direction":     signal.direction.name,
+                            "zone_key":      zone_key,
+                            "zone_members":  zone.members,
+                            "reason":        "cooldown",
+                            "cooldown_ends": str(last_exit_time + pd.Timedelta(minutes=self._cooldown_minutes)),
+                        })
+                        continue
+                    
                     # Entry price = next bar's open (approximate with current close + 1 tick).
                     # We'll use next bar's open on the following iteration for accuracy,
                     # but for simplicity use this bar's close as the entry approximation.
@@ -236,10 +273,20 @@ class BacktestHarness:
                         signal.direction, entry_price, current_stop, entry_time,
                     )
                 else:
+                    setup = signal.metadata["setup"]
+                    zone  = setup.zone
                     logger.debug(
                         "Signal %s at %s suppressed — position already active.",
                         signal.direction, bar_time,
                     )
+                    result.suppressed_signals.append({
+                        "signal_time":   str(bar_time),
+                        "direction":     signal.direction.name,
+                        "zone_key":      (round(zone.price_low, 2), round(zone.price_high, 2)),
+                        "zone_members":  zone.members,
+                        "reason":        "position_active",
+                        "active_since":  str(entry_time) if entry_time else None,
+                    })
 
         # ── Close any open position at end of data ────────────────────────────
         if active_signal is not None:

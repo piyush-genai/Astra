@@ -146,7 +146,9 @@ class PivotCprStrategy(BaseStrategy):
             self._pivot_table.loc[today],
             tolerance_pct=self._tolerance_pct,
         )
-        confluence_zones = [z for z in zones if z.is_confluence]
+        # Accept BOTH true confluence AND daily/CPR-only zones
+        # (daily/CPR breakouts are common and work when they trend)
+        tradeable_zones = [z for z in zones if z.is_confluence or z.is_daily_cpr_only]
 
         # ── State machine: no pending → look for breakout ─────────────────────
         if self._pending is None:
@@ -156,7 +158,7 @@ class PivotCprStrategy(BaseStrategy):
             else:
                 prev_close = None
 
-            for z in confluence_zones:
+            for z in tradeable_zones:
                 # A breakout requires price to have CROSSED the zone boundary,
                 # not merely to be on one side of it (prevents false triggers
                 # when price starts the day already far from the zone).

@@ -139,6 +139,28 @@ LEVEL_COLUMNS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Zone grouping and confluence detection
+# ---------------------------------------------------------------------------
+
+def _level_group(level_name: str) -> str:
+    """
+    Return which independent lookback basis a level comes from.
+    
+    Daily and CPR levels derive from the SAME prior day's OHLC — one piece 
+    of evidence, not two — so they share a group. This prevents the bug where
+    daily_P and cpr_P (which are mathematically identical: (H+L+C)/3 from the
+    same day's OHLC) get counted as two independent confirmations.
+    """
+    if level_name.startswith("daily_") or level_name.startswith("cpr_"):
+        return "daily"
+    if level_name.startswith("weekly_"):
+        return "weekly"
+    if level_name.startswith("monthly_"):
+        return "monthly"
+    return level_name
+
+
 @dataclass
 class Zone:
     price_low:  float
@@ -152,8 +174,25 @@ class Zone:
 
     @property
     def is_confluence(self) -> bool:
-        """True when 2+ independent levels cluster together."""
-        return len(self.members) >= 2
+        """
+        True only when 2+ DIFFERENT independent timeframes contribute.
+        
+        A zone with ['daily_P', 'cpr_P', 'cpr_BC'] has only ONE independent
+        source (all from yesterday's OHLC) → NOT confluence.
+        
+        A zone with ['daily_R1', 'weekly_R1'] has TWO independent sources
+        (different lookback windows) → IS confluence.
+        """
+        return len({_level_group(m) for m in self.members}) >= 2
+    
+    @property
+    def is_daily_cpr_only(self) -> bool:
+        """
+        True when zone is formed ONLY from daily/CPR levels (single-timeframe).
+        These are still tradeable — CPR is heavily watched in Indian markets.
+        """
+        groups = {_level_group(m) for m in self.members}
+        return groups == {"daily"} and len(self.members) >= 2
 
 
 def find_zones(

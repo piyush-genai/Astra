@@ -1,0 +1,11 @@
+trade_no,direction,entry_time,entry_premium,min_required,reason
+3,LONG,2026-07-06 15:00:00+05:30,13.51,30.0,premium_too_low
+4,SHORT,2026-07-13 09:25:00+05:30,23.94,30.0,premium_too_low
+6,SHORT,2026-07-14 09:45:00+05:30,2.83,15.0,premium_too_low
+7,SHORT,2026-07-14 11:40:00+05:30,0.08,15.0,premium_too_low
+8,SHORT,2026-07-20 09:25:00+05:30,28.81,30.0,premium_too_low
+9,LONG,2026-07-20 13:05:00+05:30,16.13,30.0,premium_too_low
+10,SHORT,2026-07-21 09:30:00+05:30,4.45,15.0,premium_too_low
+11,SHORT,2026-07-21 13:05:00+05:30,7.4,15.0,premium_too_low
+12,LONG,2026-07-21 14:50:00+05:30,0.28,15.0,premium_too_low
+13,SHORT,2026-07-27 10:30:00+05:30,23.73,30.0,premium_too_low

@@ -1,0 +1,9 @@
+signal_time,direction,zone_low,zone_high,zone_members,missed_reason,cooldown_ends,active_since
+2026-07-13 10:40:00+05:30,SHORT,24145.18,24186.82,"daily_S1, cpr_BC, cpr_P, daily_P",position_active,,2026-07-13 10:35:00+05:30
+2026-07-13 13:40:00+05:30,LONG,24145.18,24186.82,"daily_S1, cpr_BC, cpr_P, daily_P",cooldown,2026-07-13 13:45:00+05:30,
+2026-07-16 09:45:00+05:30,LONG,24087.45,24115.45,"cpr_BC, cpr_P, daily_P, cpr_TC",cooldown,2026-07-16 10:15:00+05:30,
+2026-07-21 10:25:00+05:30,SHORT,24200.98,24226.66,"cpr_BC, cpr_P, daily_P, cpr_TC",cooldown,2026-07-21 10:45:00+05:30,
+2026-07-21 13:25:00+05:30,LONG,24155.3,24161.53,"weekly_S2, daily_S1",cooldown,2026-07-21 13:55:00+05:30,
+2026-07-27 11:55:00+05:30,LONG,23916.73,23956.27,"weekly_R1, daily_R2",cooldown,2026-07-27 12:30:00+05:30,
+2026-07-27 12:20:00+05:30,LONG,23916.73,23956.27,"weekly_R1, daily_R2",cooldown,2026-07-27 12:30:00+05:30,
+2026-07-27 13:50:00+05:30,LONG,23916.73,23956.27,"weekly_R1, daily_R2",cooldown,2026-07-27 14:10:00+05:30,
