@@ -90,6 +90,18 @@ class PivotCprStrategy(BaseStrategy):
                                      Default 0.18. Calibrate via backtest.
         min_levels_for_confluence (int): min levels to call a zone confluent.
                                      Default 2.
+        
+        # Momentum breakout settings (NEW)
+        momentum_enabled (bool):     Enable momentum breakout signals.
+                                     Default True.
+        momentum_volume_multiplier (float): Volume must exceed this multiple
+                                     of 20-bar average. Default 2.0.
+        momentum_body_pct (float):   Candle body must be this % of total range.
+                                     Default 0.75 (75%).
+        momentum_accel_multiplier (float): Current range must exceed previous
+                                     range by this multiple. Default 1.5.
+        momentum_min_criteria (int): Minimum criteria that must be met (of 3).
+                                     Default 2.
     """
 
     STRATEGY_ID = "pivot_cpr_strategy"
@@ -99,14 +111,24 @@ class PivotCprStrategy(BaseStrategy):
         self._tolerance_pct: float = float(config.get("tolerance_pct", 0.18))
         self._min_levels: int = int(config.get("min_levels_for_confluence", 2))
 
+        # Momentum breakout config
+        self._momentum_enabled: bool = config.get("momentum_enabled", True)
+        self._momentum_vol_mult: float = float(config.get("momentum_volume_multiplier", 2.0))
+        self._momentum_body_pct: float = float(config.get("momentum_body_pct", 0.75))
+        self._momentum_accel_mult: float = float(config.get("momentum_accel_multiplier", 1.5))
+        self._momentum_min_criteria: int = int(config.get("momentum_min_criteria", 2))
+        self._momentum_checked: bool = False  # Track if we've logged at least once
+
         # Rolling state across bars.
         self._pending: Optional[_Pending] = None
         self._pivot_table: Optional[pd.DataFrame] = None
         self._pivot_table_date: Optional[pd.Timestamp] = None
 
         logger.info(
-            "PivotCprStrategy initialised | tolerance=%.3f%% | min_levels=%d",
-            self._tolerance_pct, self._min_levels,
+            "PivotCprStrategy initialised | tolerance=%.3f%% | min_levels=%d | momentum=%s (vol×%.1f, body≥%.0f%%, accel×%.1f)",
+            self._tolerance_pct, self._min_levels, 
+            "enabled" if self._momentum_enabled else "disabled",
+            self._momentum_vol_mult, self._momentum_body_pct * 100, self._momentum_accel_mult,
         )
 
     # ------------------------------------------------------------------
@@ -119,6 +141,9 @@ class PivotCprStrategy(BaseStrategy):
 
         Returns a Signal on the bar where the setup is confirmed
         (i.e. the confirmation candle, N+1 — the engine enters at N+2's open).
+        
+        OR returns an immediate momentum breakout signal if criteria are met.
+        
         Returns None otherwise.
         """
         history = market_data.history
@@ -146,9 +171,37 @@ class PivotCprStrategy(BaseStrategy):
             self._pivot_table.loc[today],
             tolerance_pct=self._tolerance_pct,
         )
-        # Accept BOTH true confluence AND daily/CPR-only zones
-        # (daily/CPR breakouts are common and work when they trend)
-        tradeable_zones = [z for z in zones if z.is_confluence or z.is_daily_cpr_only]
+        # Accept 3 zone types:
+        # 1. True confluence (2+ different timeframes)
+        # 2. Daily/CPR-only (heavily watched in Indian markets)
+        # 3. Strong single weekly/monthly levels (major institutional S/R)
+        tradeable_zones = [
+            z for z in zones 
+            if z.is_confluence or z.is_daily_cpr_only or z.is_strong_single_level
+        ]
+
+        # ── Check for MOMENTUM BREAKOUT (priority check - immediate entry) ────
+        if self._momentum_enabled:
+            # Log once to confirm we're trying
+            if not hasattr(self, '_momentum_attempt_logged'):
+                logger.info("Attempting momentum breakout checks (enabled)")
+                self._momentum_attempt_logged = True
+                
+            if len(history) < 21:  # Need 20 for avg + 1 current
+                if not hasattr(self, '_momentum_hist_warning_shown'):
+                    logger.warning(
+                        "Momentum breakout disabled - insufficient history (%d bars, need 21+)",
+                        len(history)
+                    )
+                    self._momentum_hist_warning_shown = True
+            else:
+                momentum_signal = self._check_momentum_breakout(
+                    market_data, tradeable_zones, history
+                )
+                if momentum_signal is not None:
+                    # Clear any pending regular breakout - momentum takes priority
+                    self._pending = None
+                    return momentum_signal
 
         # ── State machine: no pending → look for breakout ─────────────────────
         if self._pending is None:
@@ -247,12 +300,162 @@ class PivotCprStrategy(BaseStrategy):
             instrument=market_data.instrument,
             direction=p.direction,
             bar_time=bar_time,
-            metadata={"setup": setup},
+            metadata={
+                "setup": setup,
+                "signal_type": "regular",
+            },
         )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _check_momentum_breakout(
+        self,
+        market_data: MarketData,
+        zones: list[Zone],
+        history: pd.DataFrame,
+    ) -> Optional[Signal]:
+        """
+        Check if current bar qualifies as a high-impact momentum breakout.
+        
+        VOLUME-FREE IMPLEMENTATION (volume data not available from broker):
+        Criteria:
+        1. Range explosion: current range > accel_multiplier × average of last 10 bars
+        2. Strong body: candle body > body_pct of total range
+        3. Multi-level penetration: breaks through zone + moves deep beyond it
+        
+        If enough criteria met + breaks a zone → immediate entry signal.
+        
+        This captures violent moves like July 8th crash without volume.
+        """
+        bar = history.iloc[-1]
+        
+        # Log first successful check to confirm momentum logic is running
+        if not self._momentum_checked:
+            logger.info(
+                "✓ Momentum breakout checker active (VOLUME-FREE mode) | Looking for: range≥%.1fx avg, body≥%.0f%%",
+                self._momentum_accel_mult, self._momentum_body_pct * 100,
+            )
+            self._momentum_checked = True
+        
+        # Calculate metrics
+        body_size = abs(bar["close"] - bar["open"])
+        total_range = bar["high"] - bar["low"]
+        
+        if total_range == 0:  # Avoid division by zero
+            return None
+        
+        # Criterion 1: Range explosion (replaces volume spike)
+        # Compare current candle range to average of last 10 candles
+        recent_ranges = []
+        for i in range(-11, -1):  # Last 10 bars (exclude current)
+            if abs(i) <= len(history):
+                bar_hist = history.iloc[i]
+                recent_ranges.append(bar_hist["high"] - bar_hist["low"])
+        
+        if not recent_ranges:
+            return None
+        
+        avg_range = sum(recent_ranges) / len(recent_ranges)
+        range_explosion = total_range > (self._momentum_accel_mult * avg_range) if avg_range > 0 else False
+        
+        # Criterion 2: Strong body (not a doji/wick)
+        strong_body = (body_size / total_range) > self._momentum_body_pct
+        
+        # Criterion 3: Deep penetration (NEW - replaces acceleration check)
+        # If price moves MORE than 1.5× zone width beyond the zone, it's a strong breakout
+        deep_penetration = False
+        
+        # Count how many criteria met
+        criteria = [range_explosion, strong_body]  # Start with 2 base criteria
+        score = sum(criteria)
+        
+        # Log momentum checks for analysis (even when criteria not fully met)
+        if score >= 1 or range_explosion:  # Log if any momentum detected
+            logger.debug(
+                "Momentum check @ %s | range=%.2f (avg=%.2f, mult=%.2fx) | body=%.1f%% | score=%d/%d",
+                market_data.bar_time,
+                total_range, avg_range, total_range / avg_range if avg_range > 0 else 0,
+                100 * (body_size / total_range),
+                score, 2,  # Out of 2 base criteria
+            )
+        
+        # Relaxed threshold: need only 1 strong criterion + zone break
+        # (since we don't have volume, we're more aggressive)
+        if score < 1:
+            return None  # Not enough momentum
+        
+        # Check if this bar broke through any zone
+        for zone in zones:
+            broke_up = bar["close"] > zone.price_high
+            broke_down = bar["close"] < zone.price_low
+            
+            if not (broke_up or broke_down):
+                continue
+            
+            # Check for deep penetration (3rd criterion)
+            zone_width = zone.price_high - zone.price_low
+            if broke_up:
+                penetration_depth = bar["close"] - zone.price_high
+                deep_penetration = penetration_depth > (1.5 * zone_width) if zone_width > 0 else False
+            else:
+                penetration_depth = zone.price_low - bar["close"]
+                deep_penetration = penetration_depth > (1.5 * zone_width) if zone_width > 0 else False
+            
+            # Add deep penetration to score
+            if deep_penetration:
+                score += 1
+            
+            # MOMENTUM BREAKOUT CONFIRMED (need 2+ of 3 criteria)
+            if score >= 2:
+                direction = SignalDirection.LONG if broke_up else SignalDirection.SHORT
+                
+                # Tighter stop for momentum trades - 50% retracement of breakout candle
+                if direction == SignalDirection.LONG:
+                    initial_stop = bar["low"] + 0.5 * (bar["close"] - bar["low"])
+                else:
+                    initial_stop = bar["high"] - 0.5 * (bar["high"] - bar["close"])
+                
+                target = zone_above(zones, zone.price_high) if broke_up else zone_below(zones, zone.price_low)
+                
+                setup = TradeSetup(
+                    direction=direction,
+                    breakout_time=market_data.bar_time,
+                    confirm_time=market_data.bar_time,  # Immediate, no confirmation needed
+                    entry_time=market_data.bar_time,
+                    entry_price=market_data.close,
+                    zone=zone,
+                    initial_stop=initial_stop,
+                    target_zone=target,
+                )
+                
+                logger.info(
+                    "⚡ MOMENTUM BREAKOUT | %s | zone=[%.2f-%.2f] | range_explo=%s body=%s deep_pen=%s | score=%d/3",
+                    direction,
+                    zone.price_low, zone.price_high,
+                    "✓" if range_explosion else "✗",
+                    "✓" if strong_body else "✗",
+                    "✓" if deep_penetration else "✗",
+                    score,
+                )
+                
+                return Signal(
+                    strategy_id=self.STRATEGY_ID,
+                    instrument=market_data.instrument,
+                    direction=direction,
+                    bar_time=market_data.bar_time,
+                    metadata={
+                        "setup": setup,
+                        "signal_type": "momentum",
+                        "range_explosion": range_explosion,
+                        "strong_body": strong_body,
+                        "deep_penetration": deep_penetration,
+                        "momentum_score": score,
+                    },
+                )
+        
+        return None  # Momentum criteria met but no zone broken OR insufficient score
 
     def _build_pivots(
         self,

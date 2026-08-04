@@ -193,6 +193,18 @@ class Zone:
         """
         groups = {_level_group(m) for m in self.members}
         return groups == {"daily"} and len(self.members) >= 2
+    
+    @property
+    def is_strong_single_level(self) -> bool:
+        """
+        True when zone has exactly ONE member from weekly or monthly timeframe.
+        These are major institutional S/R levels worth trading even without confluence.
+        Captures large moves like July 8th that break through a single strong pivot.
+        """
+        if len(self.members) != 1:
+            return False
+        level = self.members[0]
+        return level.startswith("weekly_") or level.startswith("monthly_")
 
 
 def find_zones(

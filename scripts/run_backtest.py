@@ -68,11 +68,22 @@ def main() -> None:
         strategy = PivotCprStrategy(config={
             "tolerance_pct": args.tolerance,
             "min_levels_for_confluence": args.min_levels,
+            # Momentum breakout settings (VOLUME-FREE, more aggressive)
+            "momentum_enabled": True,
+            "momentum_volume_multiplier": 1.5,    # Not used (no volume)
+            "momentum_body_pct": 0.50,             # Lower: 50% body (was 60%)
+            "momentum_accel_multiplier": 1.8,      # Higher: 1.8x range explosion (was 1.3x)
+            "momentum_min_criteria": 2,            # Need 2 of 3 criteria
         })
     else:
         raise ValueError(f"Unknown strategy: {args.strategy}")
 
-    harness = BacktestHarness(strategy=strategy, instruments_config=instruments_cfg)
+    harness = BacktestHarness(
+        strategy=strategy, 
+        instruments_config=instruments_cfg,
+        cooldown_minutes=0,    # DISABLED: capture all valid breakouts
+        allow_hedge=True,      # Allow opposite-direction entries (reversals)
+    )
 
     # Fetch historical index data via Analytics Token.
     logger.info("Fetching historical data: %s to %s", args.from_date, args.to_date)
@@ -140,8 +151,13 @@ def main() -> None:
             zone_type = "CONFLUENCE"
         elif zone.is_daily_cpr_only:
             zone_type = "DAILY_CPR"
+        elif zone.is_strong_single_level:
+            zone_type = "STRONG_SINGLE"
         else:
             zone_type = "OTHER"
+        
+        # Signal type (regular vs momentum)
+        signal_type = t.signal.metadata.get("signal_type", "regular")
 
         # ── Transaction costs (corrected) ────────────────────────────────────
         # STT: 0.15% on OPTIONS PREMIUM PAID (buy side only) × lot_size
@@ -163,6 +179,7 @@ def main() -> None:
 
         rows.append({
             "trade_no":        i,
+            "signal_type":     signal_type,
             "direction":       direction,
             "zone_type":       zone_type,
             "zone_members":    ", ".join(zone.members),
@@ -230,7 +247,9 @@ def main() -> None:
         win_rate = round(100 * option_winners / len(rows), 1)
         gross_total = sum(r["gross_pnl_rs"] for r in rows)
         
-        # Count by zone type
+        # Count by zone type and signal type
+        momentum_count = sum(1 for r in rows if r["signal_type"] == "momentum")
+        regular_count = len(rows) - momentum_count
         confluence_count = sum(1 for r in rows if r["zone_type"] == "CONFLUENCE")
         daily_cpr_count  = sum(1 for r in rows if r["zone_type"] == "DAILY_CPR")
         
@@ -240,14 +259,28 @@ def main() -> None:
         print(f"  Signals generated : {len(result.signals)}")
         print(f"  Trades executed   : {len(result.trades)}")
         print(f"  Missed signals    : {len(missed_signals)}")
+        print(f"  ")
+        print(f"  SIGNAL TYPE BREAKDOWN:")
+        print(f"  — Regular breakouts (2-bar confirm): {regular_count}")
+        print(f"  — Momentum breakouts (immediate):    {momentum_count}")
+        print(f"  ")
+        print(f"  ZONE TYPE BREAKDOWN:")
         print(f"  — Confluence      : {confluence_count}")
         print(f"  — Daily/CPR only  : {daily_cpr_count}")
+        print(f"  ")
         print(f"  Winners / Losers  : {option_winners} / {option_losers}")
         print(f"  Win rate          : {win_rate}%")
         print(f"  Gross P&L         : ₹{gross_total:+,.2f}")
         print(f"  Total tx costs    : ₹{total_tx_cost:+,.2f}")
         print(f"  Net P&L           : ₹{total_option_pnl:+,.2f}")
-        print(f"  Index pts P&L     : {result.metrics.get('total_pnl_pts', 0):+.2f} pts (for reference)")
+        print(f"  ")
+        print(f"  INDEX MOVEMENT (reference only):")
+        print(f"  — Index pts P&L   : {result.metrics.get('total_pnl_pts', 0):+.2f} Nifty pts")
+        print(f"  ")
+        print(f"  PREMIUM CAPTURE (actual options P&L):")
+        premium_pts_total = sum(r["premium_chg_pts"] for r in rows)
+        print(f"  — Premium pts     : {premium_pts_total:+.2f} pts captured")
+        print(f"  — Gross options   : ₹{gross_total:+,.2f} (premium × lot_size)")
         print()
         
         if missed_signals:
