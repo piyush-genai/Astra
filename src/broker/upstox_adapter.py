@@ -226,43 +226,57 @@ class UpstoxAdapter(BrokerAdapter):
         to_date: str,
     ) -> pd.DataFrame:
         """
-        Fetch historical OHLCV data.
-
-        Args:
-            symbol:    Upstox instrument key, e.g. "NSE_INDEX|Nifty 50"
-            interval:  "1minute", "30minute", "day", "week", "month"
-                       (Upstox V3 does NOT support 5minute — use 1minute and resample)
-            from_date: ISO date "YYYY-MM-DD"
-            to_date:   ISO date "YYYY-MM-DD"
-
-        Returns:
-            DataFrame with DatetimeIndex (timezone-aware), columns:
-            open, high, low, close, volume, open_interest
+        Routes to the correct Upstox endpoint automatically:
+          - Same-day (from_date == to_date == today): v2 intraday endpoint
+            (the only one that returns live candles during the current session)
+          - Any other range: v3 historical endpoint
         """
-        # Upstox V3 historical-candle URL format:
-        # /historical-candle/{instrument_key}/{granularity}/{interval}/{to_date}/{from_date}
-        # where granularity is "minutes" or "days" etc. and interval is "1" for 1minute.
+        from datetime import datetime as _dt
+        today_str = _dt.now().strftime("%Y-%m-%d")
 
-        # Map our interval names to Upstox V3 format
+        if from_date == today_str and to_date == today_str:
+            return self._get_intraday_ohlcv(symbol, interval)
+        return self._get_historical_ohlcv(symbol, interval, from_date, to_date)
+
+    def _get_intraday_ohlcv(self, symbol: str, interval: str) -> pd.DataFrame:
+        """v2 intraday endpoint — returns today's live candles mid-session."""
+        valid = {"1minute", "30minute"}
+        if interval not in valid:
+            raise ValueError(f"Intraday only supports {valid}, got '{interval}'.")
+
+        encoded_symbol = quote(symbol, safe="")
+        url = f"https://api.upstox.com/v2/historical-candle/intraday/{encoded_symbol}/{interval}"
+
+        try:
+            resp = requests.get(url, headers=self._data_headers(), timeout=30)
+            resp.raise_for_status()
+            candles = resp.json()["data"]["candles"]
+            if not candles:
+                logger.warning("Intraday: no candles yet for %s (market may not be open)", symbol)
+                return pd.DataFrame()
+            return self._candles_to_df(candles, symbol, interval, source="intraday")
+        except Exception as e:
+            logger.error("_get_intraday_ohlcv(%s, %s) failed: %s", symbol, interval, e)
+            return pd.DataFrame()
+
+    def _get_historical_ohlcv(
+        self, symbol: str, interval: str, from_date: str, to_date: str
+    ) -> pd.DataFrame:
+        """v3 historical endpoint — for any date range that is not today."""
         interval_map = {
-            "1minute":   ("minutes", "1"),
-            "30minute":  ("minutes", "30"),
-            "day":       ("days", "1"),
-            "week":      ("days", "7"),    # approximate — Upstox docs unclear on "week"
-            "month":     ("months", "1"),
+            "1minute":  ("minutes", "1"),
+            "30minute": ("minutes", "30"),
+            "day":      ("days", "1"),
+            "week":     ("days", "7"),
+            "month":    ("months", "1"),
         }
-
         if interval not in interval_map:
             raise ValueError(
-                f"Invalid interval '{interval}'. "
-                f"Valid: {', '.join(interval_map.keys())}"
+                f"Invalid interval '{interval}'. Valid: {', '.join(interval_map)}"
             )
 
         granularity, count = interval_map[interval]
-
-        # URL-encode the instrument key — pipe | → %7C, space → %20
         encoded_symbol = quote(symbol, safe="")
-
         url = (
             f"{self.DATA_BASE_URL}/historical-candle/{encoded_symbol}/"
             f"{granularity}/{count}/{to_date}/{from_date}"
@@ -271,35 +285,38 @@ class UpstoxAdapter(BrokerAdapter):
         try:
             resp = requests.get(url, headers=self._data_headers(), timeout=30)
             resp.raise_for_status()
-            data = resp.json()
-
-            # Response: {"status": "success", "data": {"candles": [...]}}
-            # Each candle: [timestamp, open, high, low, close, volume, open_interest]
-            candles = data["data"]["candles"]
-
+            candles = resp.json()["data"]["candles"]
             if not candles:
-                logger.warning("No candles returned for %s %s %s→%s", symbol, interval, from_date, to_date)
+                logger.warning(
+                    "Historical: no candles for %s %s %s->%s",
+                    symbol, interval, from_date, to_date,
+                )
                 return pd.DataFrame()
-
-            df = pd.DataFrame(
-                candles,
-                columns=["timestamp", "open", "high", "low", "close", "volume", "open_interest"],
-            )
-
-            # Parse timestamp (ISO 8601 with timezone)
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
-            df = df.set_index("timestamp").sort_index()
-
-            logger.info(
-                "Fetched %d candles for %s (%s) from %s to %s",
-                len(df), symbol, interval, df.index[0], df.index[-1],
-            )
-
-            return df
-
+            return self._candles_to_df(candles, symbol, interval, source="historical")
         except Exception as e:
-            logger.error("get_ohlcv(%s, %s, %s, %s) failed: %s", symbol, interval, from_date, to_date, e)
+            logger.error(
+                "_get_historical_ohlcv(%s, %s, %s, %s) failed: %s",
+                symbol, interval, from_date, to_date, e,
+            )
             return pd.DataFrame()
+
+    @staticmethod
+    def _candles_to_df(
+        candles: list, symbol: str, interval: str, source: str = ""
+    ) -> pd.DataFrame:
+        """Convert raw Upstox candle list to a tidy ascending-index DataFrame."""
+        df = pd.DataFrame(
+            candles,
+            columns=["timestamp", "open", "high", "low", "close", "volume", "open_interest"],
+        )
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.set_index("timestamp").sort_index()
+        logger.info(
+            "[%s] %d candles | %s (%s) | %s -> %s",
+            source, len(df), symbol, interval, df.index[0], df.index[-1],
+        )
+        return df
+
 
     def get_option_chain(self, instrument: str, expiry: Optional[str] = None) -> list:
         """
