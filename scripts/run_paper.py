@@ -39,6 +39,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Telegram bot for real-time trade alerts
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+def send_telegram_alert(message: str):
+    """Send a message to Telegram (trade alerts)."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return  # Silently skip if Telegram not configured
+    
+    try:
+        import requests
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML",
+        }
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        logger.warning("Failed to send Telegram alert: %s", e)
+
+
 
 class PaperTradingEngine:
     """Simulated trading engine - logs trades but doesn't place orders."""
@@ -145,6 +167,19 @@ class PaperTradingEngine:
             "📈 PAPER ENTRY: %s %d lots @ ₹%.2f | Premium=₹%.2f | Stop=₹%.2f | Capital=₹%.2f",
             direction, lots, entry_price, entry_premium, self.current_stop, self.capital
         )
+        
+        # Send Telegram alert
+        alert_msg = (
+            f"📈 <b>ENTRY</b>\n"
+            f"Direction: {direction.name}\n"
+            f"Lots: {lots}\n"
+            f"Entry Price: ₹{entry_price:.2f}\n"
+            f"Premium: ₹{entry_premium:.2f}\n"
+            f"Stop: ₹{self.current_stop:.2f}\n"
+            f"Capital: ₹{self.capital:.2f}\n"
+            f"Time: {bar_time.strftime('%H:%M')}"
+        )
+        send_telegram_alert(alert_msg)
     
     def exit_position(self, bar_time, exit_price, exit_reason):
         """Exit paper position and calculate P&L."""
@@ -200,6 +235,20 @@ class PaperTradingEngine:
             direction, net_pnl, (net_pnl / (self.entry_premium * lot_size * self.lots)) * 100,
             exit_reason, hold_minutes, self.capital
         )
+        
+        # Send Telegram alert
+        pnl_emoji = "[WIN]" if net_pnl > 0 else "[LOSS]"
+        pnl_pct = (net_pnl / (self.entry_premium * lot_size * self.lots)) * 100
+        alert_msg = (
+            f"{pnl_emoji} <b>EXIT</b>\n"
+            f"Direction: {direction.name}\n"
+            f"P&L: Rs.{net_pnl:.2f} ({pnl_pct:+.1f}%)\n"
+            f"Exit Reason: {exit_reason}\n"
+            f"Hold Time: {hold_minutes:.1f} min\n"
+            f"Capital Now: Rs.{self.capital:.2f}\n"
+            f"Time: {bar_time.strftime('%H:%M')}"
+        )
+        send_telegram_alert(alert_msg)
         
         # Set cooldown
         self.last_exit_zone = (round(zone.price_low, 2), round(zone.price_high, 2))
