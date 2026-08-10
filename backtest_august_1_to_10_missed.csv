@@ -1,0 +1,29 @@
+signal_time,direction,zone_low,zone_high,zone_members,missed_reason,cooldown_ends,active_since
+2026-08-04 11:25:00+05:30,SHORT,24687.92,24731.11,"cpr_P, daily_P, cpr_TC",position_active,,2026-08-04 11:25:00+05:30
+2026-08-04 11:30:00+05:30,SHORT,24687.92,24731.11,"cpr_P, daily_P, cpr_TC",position_active,,2026-08-04 11:25:00+05:30
+2026-08-04 11:40:00+05:30,SHORT,24687.92,24731.11,"cpr_P, daily_P, cpr_TC",position_active,,2026-08-04 11:25:00+05:30
+2026-08-04 11:45:00+05:30,SHORT,24601.53,24644.72,"daily_S1, cpr_BC",position_active,,2026-08-04 11:25:00+05:30
+2026-08-04 11:55:00+05:30,SHORT,24601.53,24644.72,"daily_S1, cpr_BC",position_active,,2026-08-04 11:25:00+05:30
+2026-08-04 12:05:00+05:30,SHORT,24601.53,24644.72,"daily_S1, cpr_BC",position_active,,2026-08-04 11:25:00+05:30
+2026-08-04 13:30:00+05:30,SHORT,24601.53,24644.72,"daily_S1, cpr_BC",position_active,,2026-08-04 13:30:00+05:30
+2026-08-04 13:40:00+05:30,SHORT,24601.53,24644.72,"daily_S1, cpr_BC",position_active,,2026-08-04 13:30:00+05:30
+2026-08-04 13:45:00+05:30,SHORT,24601.53,24644.72,"daily_S1, cpr_BC",position_active,,2026-08-04 13:30:00+05:30
+2026-08-04 13:50:00+05:30,SHORT,24601.53,24644.72,"daily_S1, cpr_BC",position_active,,2026-08-04 13:30:00+05:30
+2026-08-05 12:55:00+05:30,SHORT,24565.93,24598.57,"cpr_BC, cpr_P, daily_P, cpr_TC",position_active,,2026-08-05 12:35:00+05:30
+2026-08-05 13:40:00+05:30,SHORT,24565.93,24598.57,"cpr_BC, cpr_P, daily_P, cpr_TC",position_active,,2026-08-05 13:25:00+05:30
+2026-08-06 11:15:00+05:30,LONG,24587.78,24612.36,"cpr_BC, cpr_P, daily_P, cpr_TC",position_active,,2026-08-06 11:15:00+05:30
+2026-08-06 11:20:00+05:30,LONG,24587.78,24612.36,"cpr_BC, cpr_P, daily_P, cpr_TC",position_active,,2026-08-06 11:15:00+05:30
+2026-08-06 12:00:00+05:30,LONG,24587.78,24612.36,"cpr_BC, cpr_P, daily_P, cpr_TC",position_active,,2026-08-06 12:00:00+05:30
+2026-08-07 10:25:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 10:20:00+05:30
+2026-08-07 11:00:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 11:00:00+05:30
+2026-08-07 11:05:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 11:00:00+05:30
+2026-08-07 11:15:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 11:00:00+05:30
+2026-08-07 11:45:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 11:45:00+05:30
+2026-08-07 11:50:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 11:45:00+05:30
+2026-08-07 11:55:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 11:45:00+05:30
+2026-08-07 12:00:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 11:45:00+05:30
+2026-08-07 12:10:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 11:45:00+05:30
+2026-08-07 12:15:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 11:45:00+05:30
+2026-08-07 12:55:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 12:55:00+05:30
+2026-08-07 14:05:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 14:05:00+05:30
+2026-08-07 14:10:00+05:30,SHORT,24637.53,24673.98,"cpr_BC, cpr_P, daily_P, cpr_TC, daily_R1",position_active,,2026-08-07 14:05:00+05:30

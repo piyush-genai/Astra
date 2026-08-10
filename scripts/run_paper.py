@@ -326,9 +326,29 @@ class PaperTradingEngine:
         start_time = datetime.now()
         end_time = start_time + timedelta(minutes=duration_minutes)
         
-        # Initialize history buffer
-        history_window = 100
+        # Pre-fetch historical DAILY data for pivot calculation
+        logger.info("📊 Fetching historical daily data for pivot calculation...")
+        lookback_days = 90  # 90 days ensures we have weekly/monthly pivots
+        from_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        daily_ohlcv = self.adapter.get_ohlcv(
+            symbol="NSE_INDEX|Nifty 50",
+            interval="day",
+            from_date=from_date,
+            to_date=today,
+        )
+        
+        if daily_ohlcv is None or daily_ohlcv.empty:
+            logger.error("Failed to fetch historical daily data - cannot calculate pivots!")
+            return
+        
+        logger.info("✓ Fetched %d days of historical data for pivot calculation", len(daily_ohlcv))
+        
+        # Initialize history buffer - only need 2 bars minimum now!
+        history_window = 2  # Minimum for strategy to work
         history = pd.DataFrame()
+        historical_data_for_pivots = daily_ohlcv  # Store for pivot calculation
         
         try:
             while datetime.now() < end_time:
@@ -376,10 +396,27 @@ class PaperTradingEngine:
                 # Update history
                 history = ohlcv_5min.iloc[-history_window:]
                 
+                # Update today's running daily bar for pivot calculation
+                today_date = bar_time.normalize()
+                today_bars = ohlcv_5min[ohlcv_5min.index.normalize() == today_date]
+                today_daily = pd.DataFrame([{
+                    "open": today_bars.iloc[0]["open"],
+                    "high": today_bars["high"].max(),
+                    "low": today_bars["low"].min(),
+                    "close": current_bar["close"],
+                }], index=[today_date])
+                
+                # Combine: historical daily + today's running bar
+                pivot_data = pd.concat([historical_data_for_pivots, today_daily])
+                pivot_data = pivot_data[~pivot_data.index.duplicated(keep='last')]
+                
+                # Inject daily data into strategy for pivot calculation
+                self.strategy._daily_ohlc = pivot_data
+                
                 logger.info("Processing bar: %s | Close=%.2f", bar_time, current_bar["close"])
                 self.update_status(f"Processing bar {bar_time} | Close={current_bar['close']:.2f} | Capital=₹{self.capital:.2f}")
                 
-                # Manage existing position
+                # Manage existing position (uses 5-min history for trailing stops)
                 self.manage_position(current_bar, history)
                 
                 # Evaluate for new signal (if no active position)
@@ -392,7 +429,7 @@ class PaperTradingEngine:
                         low=float(current_bar["low"]),
                         close=float(current_bar["close"]),
                         volume=float(current_bar.get("volume", 0)),
-                        history=history,
+                        history=history,  # 5-min bars for signals and momentum
                     )
                     
                     try:

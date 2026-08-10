@@ -156,7 +156,9 @@ class PivotCprStrategy(BaseStrategy):
         # ── Rebuild pivot table once per day ─────────────────────────────────
         today = bar_time.normalize()
         if self._pivot_table is None or today != self._pivot_table_date:
-            self._pivot_table = self._build_pivots(history, today)
+            # Check if strategy has daily_ohlc injected (for live trading)
+            daily_ohlc = getattr(self, '_daily_ohlc', None)
+            self._pivot_table = self._build_pivots(history, today, daily_ohlc=daily_ohlc)
             self._pivot_table_date = today
             self._pending = None   # reset pending on day change
 
@@ -461,13 +463,42 @@ class PivotCprStrategy(BaseStrategy):
         self,
         history: pd.DataFrame,
         today: pd.Timestamp,
+        daily_ohlc: Optional[pd.DataFrame] = None,
     ) -> Optional[pd.DataFrame]:
         """
-        Build the daily pivot table from intraday history.
+        Build the daily pivot table.
 
-        history is 5-min bars; resample to daily OHLC first.
-        Returns None if there isn't enough daily history.
+        Args:
+            history: 5-min bars (fallback if daily_ohlc not provided)
+            today: Current trading day
+            daily_ohlc: Optional pre-fetched daily OHLC data (PREFERRED)
+        
+        If daily_ohlc is provided, use it directly. Otherwise, resample from
+        intraday history (requires many bars).
+        
+        Returns None if there isn't enough data.
         """
+        if daily_ohlc is not None:
+            # Use pre-fetched daily data (preferred path for live trading)
+            daily = daily_ohlc.copy()
+            daily.columns = [c.lower() for c in daily.columns]
+            
+            # Ensure today is included
+            if today not in daily.index:
+                # Get today's partial bar from intraday history
+                today_bars = history[history.index.normalize() == today]
+                if not today_bars.empty:
+                    daily.loc[today] = {
+                        "open":  today_bars["open"].iloc[0],
+                        "high":  today_bars["high"].max(),
+                        "low":   today_bars["low"].min(),
+                        "close": today_bars["close"].iloc[-1],
+                    }
+                    daily = daily.sort_index()
+            
+            return build_pivot_table(daily)
+        
+        # Fallback: resample from 5-min bars (needs many bars)
         history = history.copy()
         history.columns = [c.lower() for c in history.columns]
 
