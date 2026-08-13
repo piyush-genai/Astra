@@ -1,0 +1,2 @@
+exit_time,signal_type,direction,entry_price,exit_price,entry_premium,exit_premium,lots,gross_pnl,tx_cost,net_pnl,exit_reason,hold_minutes,capital_after
+2026-08-13 13:10:00+05:30,regular,SHORT,24369.0,24369.45,126.57,126.25,1,-20.799999999999557,57.340575,-78.14057499999956,eod,10.0,19921.859425
