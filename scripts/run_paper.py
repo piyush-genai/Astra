@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -72,8 +73,11 @@ class PaperTradingEngine:
         self.instruments_cfg = instruments_cfg
         self.risk_cfg = risk_cfg
         
+        # Load persisted capital state
+        self.capital_state_file = Path(__file__).parent.parent / "capital_state.json"
+        self.capital = self._load_capital()
+        
         # Paper trading state
-        self.capital = 20000.0  # Starting capital
         self.active_position = None
         self.entry_time = None
         self.entry_price = None
@@ -86,6 +90,10 @@ class PaperTradingEngine:
         self.trades = []
         self.signals_suppressed = []
         
+        # Circuit breaker state (set at session start)
+        self.day_start_capital = None
+        self.circuit_breaker_tripped = False
+        
         # Cooldown tracking
         self.last_exit_zone = None
         self.last_exit_time = None
@@ -93,31 +101,89 @@ class PaperTradingEngine:
         
         logger.info("Paper Trading Engine initialized with ₹%.2f capital", self.capital)
     
+    def _load_capital(self):
+        """Load persisted capital from capital_state.json."""
+        if self.capital_state_file.exists():
+            try:
+                with open(self.capital_state_file, "r") as f:
+                    state = json.load(f)
+                capital = state["running_capital"]
+                last_session = state.get("last_session_date", "unknown")
+                logger.info("✓ Loaded capital state: ₹%.2f (last session: %s)", capital, last_session)
+                return capital
+            except Exception as e:
+                logger.error("Failed to load capital state: %s - starting fresh", e)
+        
+        # First run ever - use starting_capital from config
+        starting_capital = self.risk_cfg.get("capital", {}).get("starting_capital", 20000)
+        logger.info("✓ First run - initializing capital at ₹%.2f", starting_capital)
+        self._save_capital(starting_capital)
+        return starting_capital
+    
+    def _save_capital(self, capital=None):
+        """Save current capital state to capital_state.json."""
+        if capital is None:
+            capital = self.capital
+        
+        state = {
+            "running_capital": capital,
+            "last_updated": datetime.now().isoformat(),
+            "last_session_date": datetime.now().strftime("%Y-%m-%d"),
+        }
+        
+        try:
+            with open(self.capital_state_file, "w") as f:
+                json.dump(state, f, indent=2)
+            logger.debug("Capital state saved: ₹%.2f", capital)
+        except Exception as e:
+            logger.error("Failed to save capital state: %s", e)
+    
     def calculate_position_size(self, signal, entry_premium):
         """Calculate how many lots to trade based on capital and risk limits."""
         lot_size = self.instruments_cfg["instruments"]["NIFTY"]["lot_size"]
+        per_trade_cfg = self.risk_cfg["per_trade"]
         
-        # Rule 1: Risk-based (max 2% risk)
-        max_risk = self.capital * 0.02
+        # Rule 1: Risk-based (max % risk from config)
+        max_risk = self.capital * (per_trade_cfg["max_loss_per_trade_pct"] / 100)
         max_loss_per_lot = entry_premium * lot_size
         lots_from_risk = int(max_risk / max_loss_per_lot) if max_loss_per_lot > 0 else 0
         
-        # Rule 2: Capital-based (max 10% deployed)
-        max_deployed = self.capital * 0.10
+        # Rule 2: Capital-based (max % deployed from config)
+        max_deployed = self.capital * (per_trade_cfg["max_capital_deployed_pct"] / 100)
         lots_from_capital = int(max_deployed / max_loss_per_lot) if max_loss_per_lot > 0 else 0
         
-        # Rule 3: Hard cap
-        hard_cap = 10
+        # Rule 3: Hard cap (absolute limit from config)
+        hard_cap = self.risk_cfg["position_limits"]["hard_cap_lots"]
         
         # Take minimum, but at least 1 if we're trading
         lots = max(1, min(lots_from_risk, lots_from_capital, hard_cap))
         
         logger.debug(
-            "Position sizing: capital=₹%.0f, premium=₹%.2f, risk_lots=%d, cap_lots=%d → %d lots",
-            self.capital, entry_premium, lots_from_risk, lots_from_capital, lots
+            "Position sizing: capital=₹%.0f, premium=₹%.2f, risk_lots=%d, cap_lots=%d, hard_cap=%d → %d lots",
+            self.capital, entry_premium, lots_from_risk, lots_from_capital, hard_cap, lots
         )
         
         return lots
+    
+    def check_circuit_breaker(self):
+        """Halt new entries if today's realized loss breaches the daily limit."""
+        daily_limit_pct = self.risk_cfg["circuit_breaker"]["daily_loss_limit_pct"]
+        daily_limit_rupees = self.day_start_capital * (daily_limit_pct / 100)
+        today_pnl = self.capital - self.day_start_capital  # realized only
+        
+        if today_pnl <= -daily_limit_rupees and not self.circuit_breaker_tripped:
+            self.circuit_breaker_tripped = True
+            logger.warning(
+                "🛑 CIRCUIT BREAKER TRIPPED: today's loss ₹%.2f exceeds limit ₹%.2f (%.1f%% of day-start capital ₹%.2f)",
+                -today_pnl, daily_limit_rupees, daily_limit_pct, self.day_start_capital
+            )
+            self.update_status(f"CIRCUIT BREAKER TRIPPED — halted for the day. Loss: ₹{-today_pnl:.2f}")
+            send_telegram_alert(
+                f"🛑 <b>CIRCUIT BREAKER TRIPPED</b>\n"
+                f"Today's loss: ₹{-today_pnl:.2f}\n"
+                f"Limit: ₹{daily_limit_rupees:.2f} ({daily_limit_pct}%)\n"
+                f"No new positions will open for the rest of today."
+            )
     
     def check_cooldown(self, signal):
         """Check if this zone is in cooldown period."""
@@ -278,6 +344,9 @@ class PaperTradingEngine:
         # Update capital
         self.capital += net_pnl
         
+        # Save capital state immediately (protects against crashes)
+        self._save_capital()
+        
         # Get contract details for logging
         contract_symbol = f"NIFTY {self.entry_expiry.strftime('%d%b%y').upper()} {self.entry_strike:.0f} {self.entry_option_type}"
         
@@ -330,6 +399,9 @@ class PaperTradingEngine:
         # Set cooldown
         self.last_exit_zone = (round(zone.price_low, 2), round(zone.price_high, 2))
         self.last_exit_time = datetime.now()
+        
+        # Check circuit breaker after exit
+        self.check_circuit_breaker()
         
         # Clear position
         self.active_position = None
@@ -403,6 +475,14 @@ class PaperTradingEngine:
         """Run paper trading for specified duration (default = full trading day)."""
         logger.info("🚀 Starting paper trading session...")
         self.update_status("Paper trading started")
+        
+        # Snapshot day-start capital for circuit breaker calculations
+        self.day_start_capital = self.capital
+        self.circuit_breaker_tripped = False
+        logger.info("📊 Day-start capital: ₹%.2f (circuit breaker @ %.1f%% = ₹%.2f)",
+                   self.day_start_capital,
+                   self.risk_cfg["circuit_breaker"]["daily_loss_limit_pct"],
+                   self.day_start_capital * (self.risk_cfg["circuit_breaker"]["daily_loss_limit_pct"] / 100))
         
         start_time = datetime.now()
         end_time = start_time + timedelta(minutes=duration_minutes)
@@ -501,7 +581,7 @@ class PaperTradingEngine:
                 self.manage_position(current_bar, history)
                 
                 # Evaluate for new signal (if no active position)
-                if not self.active_position:
+                if not self.active_position and not self.circuit_breaker_tripped:
                     market_data = MarketData(
                         instrument="NIFTY",
                         bar_time=bar_time,
@@ -545,6 +625,9 @@ class PaperTradingEngine:
                 last_bar = history.iloc[-1]
                 self.exit_position(last_bar.name, last_bar["close"], "eod")
             
+            # Ensure final capital state is saved
+            self._save_capital()
+            
             # Save results
             self.save_results()
     
@@ -568,10 +651,11 @@ class PaperTradingEngine:
         logger.info("=" * 80)
         logger.info("PAPER TRADING SESSION SUMMARY")
         logger.info("=" * 80)
-        logger.info("Starting Capital: ₹20,000.00")
+        logger.info("Starting Capital: ₹%.2f", self.day_start_capital)
         logger.info("Ending Capital:   ₹%.2f", self.capital)
         logger.info("Net P&L:          ₹%.2f (%.2f%%)", 
-                   self.capital - 20000, ((self.capital - 20000) / 20000) * 100)
+                   self.capital - self.day_start_capital, 
+                   ((self.capital - self.day_start_capital) / self.day_start_capital) * 100)
         logger.info("")
         logger.info("Total Trades:     %d", len(df))
         logger.info("Winners:          %d (%.1f%%)", len(winners), 

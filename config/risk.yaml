@@ -1,39 +1,49 @@
-# Risk configuration — enforced by RiskManager and PositionManager at runtime.
-# Strategies never read or enforce these; the engine applies them uniformly.
-#
-# All monetary values in INR.
+# Risk configuration — single source of truth. Enforced entirely by PaperTradingEngine
+# (and, later, the live RiskManager). No risk numbers should be hardcoded in Python.
+
+capital:
+  # Capital used to seed the FIRST-EVER paper trading session. After that,
+  # capital compounds automatically via capital_state.json — this value is
+  # not re-applied on subsequent runs.
+  starting_capital: 20000
+
+  # Hard governance ceiling for eventual LIVE deployment. Separate from the
+  # paper-trading running balance. Used only when sizing the real funded
+  # account before going live — not read by the paper engine.
+  allocated_capital: 200000
 
 per_trade:
-  # Maximum rupee loss allowed on a single position.
-  # For a long option: premium_paid × lot_size must be ≤ this.
-  # For a debit spread: net_debit × lot_size must be ≤ this.
-  max_loss_per_trade: 5000
+  # Max % of CURRENT running capital allowed to be at risk on a single trade.
+  # Derived from your original ₹5000 / ₹200,000 target = 2.5%.
+  # Review this number — it's inherited from your own prior config, not a
+  # universal rule.
+  max_loss_per_trade_pct: 2.5
+
+  # Max % of CURRENT running capital allowed to be deployed across open
+  # positions at once. NOTE: your old YAML said 50%, your old code enforced
+  # 10% — these disagreed. Pick one deliberately; 10% is what's already been
+  # running during your live paper test, so it's the safer default unless
+  # you have a specific reason to raise it.
+  max_capital_deployed_pct: 10.0
 
 circuit_breaker:
-  # Once cumulative (realized + unrealized) loss for the session
-  # reaches or exceeds this amount, RiskManager halts ALL new orders
-  # for the remainder of the day. Resets at next session open.
-  daily_loss_limit: 15000
+  # % of DAY-START capital (frozen at session start, not continuously
+  # updated) that triggers a full halt on new orders for the rest of the day.
+  # Derived from your original ₹15,000 / ₹200,000 target = 7.5%.
+  daily_loss_limit_pct: 7.5
 
 concurrency:
-  # Maximum open positions on the same instrument at any time,
-  # regardless of which strategy(ies) generated the signals.
-  max_concurrent_positions_per_instrument: 1
+  max_concurrent_positions_per_instrument: 1   # unchanged — count, not %
 
-  # Maximum percentage of total allocated capital that can be
-  # deployed across ALL open positions simultaneously.
-  max_total_capital_deployed_pct: 50.0
+position_limits:
+  # Absolute ceiling on lots per single order, independent of capital.
+  # Exists to catch a sizing bug producing an absurd order, and to respect
+  # the exchange's per-order freeze quantity for the current lot size.
+  # VERIFY current NIFTY freeze quantity via Upstox's option contract API
+  # (freeze_quantity field) before trusting this number — do not assume it.
+  hard_cap_lots: 10
 
-# Total capital this system is allowed to use.
-# Keep this strictly separate from other funds.
-allocated_capital: 200000
-
-# Algo-ID assigned by broker after strategy registration.
-# Mandatory since 1 April 2026 (Rule 9 in trading-risk-rules.md).
-# The engine will refuse to place orders if this is null/empty.
 algo_ids:
-  pivot_cpr_strategy: null   # fill in after registering with Upstox
+  pivot_cpr_strategy: null   # unchanged — fill in after registering with Upstox
 
-# Kill switch — flip to true via CLI or Telegram bot to halt all new orders immediately.
-# The engine polls this flag; it does NOT require a restart.
-kill_switch_active: false
+kill_switch_active: false     # unchanged
