@@ -33,23 +33,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_month(start_date, end_date, capital, strategy, adapter, pricer, instruments_cfg, cooldown_minutes=0):
+def run_month(start_date, end_date, capital, strategy, adapter, pricer, instruments_cfg, risk_cfg, cooldown_minutes=0):
     """Run backtest for one month with position sizing."""
     logger.info("")
     logger.info("=" * 80)
     logger.info(f"MONTH: {start_date} to {end_date} | Starting Capital: ₹{capital:,.2f}")
     logger.info("=" * 80)
     
-    # Create harness with capital-aware position sizing + HARD LIMITS
+    # Create harness with config-based position sizing
     harness = BacktestHarness(
         strategy=strategy,
         instruments_config=instruments_cfg,
-        cooldown_minutes=cooldown_minutes,  # Configurable cooldown
+        risk_config=risk_cfg,  # Pass risk config (reads from risk.yaml)
+        cooldown_minutes=cooldown_minutes,
         allow_hedge=True,
-        initial_capital=capital,       # Enable position sizing
-        risk_per_trade_pct=2.0,        # Risk 2% per trade (conservative)
-        max_capital_deployed_pct=10.0, # Max 10% capital in one position (was 40% - too aggressive!)
-        max_lots_per_trade=10,         # HARD CAP: Max 10 lots per trade (realistic for retail)
+        initial_capital=capital,
     )
     
     # Fetch data
@@ -382,7 +380,7 @@ def main():
         summary, trades = run_month(
             month["start"], month["end"],
             capital,
-            strategy, adapter, pricer, instruments_cfg,
+            strategy, adapter, pricer, instruments_cfg, risk_cfg,
             selected_config["cooldown_minutes"]  # Pass cooldown setting
         )
         

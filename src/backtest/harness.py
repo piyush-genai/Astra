@@ -101,23 +101,27 @@ class BacktestHarness:
         self,
         strategy: BaseStrategy,
         instruments_config: dict,
+        risk_config: dict,  # NEW: Pass risk config instead of individual params
         history_window: int = 100,
         cooldown_minutes: int = 0,  # DISABLED: let stop-loss be discipline, not cooldown
         allow_hedge: bool = True,   # Allow opposite-direction entries (hedge mode)
         initial_capital: Optional[float] = None,  # For position sizing (None = unlimited)
-        risk_per_trade_pct: float = 2.0,          # Max % of capital to risk per trade
-        max_capital_deployed_pct: float = 40.0,   # Max % of capital in one position
-        max_lots_per_trade: int = 10,             # Hard cap on lots per trade (exchange/broker limits)
     ) -> None:
         self._strategy = strategy
         self._instruments = instruments_config
+        self._risk_config = risk_config
         self._history_window = history_window
         self._cooldown_minutes = cooldown_minutes
         self._allow_hedge = allow_hedge
         self._initial_capital = initial_capital
-        self._risk_per_trade_pct = risk_per_trade_pct / 100.0
-        self._max_capital_deployed_pct = max_capital_deployed_pct / 100.0
-        self._max_lots_per_trade = max_lots_per_trade  # Hard cap per trade
+        
+        # Load risk parameters from config
+        per_trade_cfg = risk_config["per_trade"]
+        position_limits_cfg = risk_config["position_limits"]
+        
+        self._risk_per_trade_pct = per_trade_cfg["max_loss_per_trade_pct"] / 100.0
+        self._max_capital_deployed_pct = per_trade_cfg["max_capital_deployed_pct"] / 100.0
+        self._max_lots_per_trade = position_limits_cfg["hard_cap_lots"]
         self._current_capital = initial_capital  # Tracks capital as trades complete
 
     def run(self, ohlcv: pd.DataFrame, pricer=None) -> BacktestResult:
