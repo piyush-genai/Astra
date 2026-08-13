@@ -163,17 +163,25 @@ class PaperTradingEngine:
         self.current_stop = setup.initial_stop
         self.bars_in_trade = 0
         
+        # Determine option contract details
+        from src.backtest.options_pricer import atm_strike, next_expiry
+        strike = atm_strike(entry_price, self.pricer.strike_step)
+        option_type = "CALL" if direction == SignalDirection.LONG else "PUT"
+        expiry_date = next_expiry(bar_time.date(), self.pricer.expiry_weekday)
+        contract_symbol = f"NIFTY {expiry_date.strftime('%d%b%y').upper()} {strike:.0f} {option_type}"
+        
         logger.info(
-            "📈 PAPER ENTRY: %s %d lots @ ₹%.2f | Premium=₹%.2f | Stop=₹%.2f | Capital=₹%.2f",
-            direction, lots, entry_price, entry_premium, self.current_stop, self.capital
+            "📈 PAPER ENTRY: %s %d lots @ ₹%.2f | Premium=₹%.2f | Stop=₹%.2f | Capital=₹%.2f | Contract=%s",
+            direction, lots, entry_price, entry_premium, self.current_stop, self.capital, contract_symbol
         )
         
         # Send Telegram alert
         alert_msg = (
             f"📈 <b>ENTRY</b>\n"
+            f"Contract: <b>{contract_symbol}</b>\n"
             f"Direction: {direction.name}\n"
             f"Lots: {lots}\n"
-            f"Entry Price: ₹{entry_price:.2f}\n"
+            f"Spot: ₹{entry_price:.2f}\n"
             f"Premium: ₹{entry_premium:.2f}\n"
             f"Stop: ₹{self.current_stop:.2f}\n"
             f"Capital: ₹{self.capital:.2f}\n"
@@ -210,6 +218,13 @@ class PaperTradingEngine:
         # Update capital
         self.capital += net_pnl
         
+        # Get contract details for logging
+        from src.backtest.options_pricer import atm_strike, next_expiry
+        strike = atm_strike(self.entry_price, self.pricer.strike_step)
+        option_type = "CALL" if direction == SignalDirection.LONG else "PUT"
+        expiry_date = next_expiry(self.entry_time.date(), self.pricer.expiry_weekday)
+        contract_symbol = f"NIFTY {expiry_date.strftime('%d%b%y').upper()} {strike:.0f} {option_type}"
+        
         # Record trade
         hold_minutes = (bar_time - self.entry_time).total_seconds() / 60
         trade = {
@@ -227,25 +242,28 @@ class PaperTradingEngine:
             "exit_reason": exit_reason,
             "hold_minutes": hold_minutes,
             "capital_after": self.capital,
+            "contract": contract_symbol,
         }
         self.trades.append(trade)
         
         logger.info(
-            "📉 PAPER EXIT: %s | P&L=₹%.2f (%.1f%%) | Reason=%s | Hold=%.1fmin | Capital=₹%.2f",
-            direction, net_pnl, (net_pnl / (self.entry_premium * lot_size * self.lots)) * 100,
+            "📉 PAPER EXIT: %s | %s | P&L=₹%.2f (%.1f%%) | Reason=%s | Hold=%.1fmin | Capital=₹%.2f",
+            contract_symbol, direction, net_pnl, (net_pnl / (self.entry_premium * lot_size * self.lots)) * 100,
             exit_reason, hold_minutes, self.capital
         )
         
         # Send Telegram alert
-        pnl_emoji = "[WIN]" if net_pnl > 0 else "[LOSS]"
+        pnl_emoji = "✅" if net_pnl > 0 else "❌"
         pnl_pct = (net_pnl / (self.entry_premium * lot_size * self.lots)) * 100
         alert_msg = (
             f"{pnl_emoji} <b>EXIT</b>\n"
+            f"Contract: <b>{contract_symbol}</b>\n"
             f"Direction: {direction.name}\n"
-            f"P&L: Rs.{net_pnl:.2f} ({pnl_pct:+.1f}%)\n"
-            f"Exit Reason: {exit_reason}\n"
-            f"Hold Time: {hold_minutes:.1f} min\n"
-            f"Capital Now: Rs.{self.capital:.2f}\n"
+            f"P&L: ₹{net_pnl:.2f} ({pnl_pct:+.1f}%)\n"
+            f"Entry: ₹{self.entry_premium:.2f} → Exit: ₹{leg.exit_premium:.2f}\n"
+            f"Reason: {exit_reason}\n"
+            f"Hold: {hold_minutes:.1f} min\n"
+            f"Capital: ₹{self.capital:.2f}\n"
             f"Time: {bar_time.strftime('%H:%M')}"
         )
         send_telegram_alert(alert_msg)
