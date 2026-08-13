@@ -203,7 +203,8 @@ class UpstoxAdapter(BrokerAdapter):
         Returns:
             Last traded price as float, or None on failure.
         """
-        url = f"{self.DATA_BASE_URL}/market-quote/ltp"
+        # Try v2 endpoint first (more widely available)
+        url = "https://api.upstox.com/v2/market-quote/ltp"
         params = {"instrument_key": symbol}
 
         try:
@@ -215,8 +216,19 @@ class UpstoxAdapter(BrokerAdapter):
             response_key = symbol.replace("|", ":")
             return float(data["data"][response_key]["last_price"])
         except Exception as e:
-            logger.error("get_ltp(%s) failed: %s", symbol, e)
-            return None
+            logger.debug("v2 get_ltp(%s) failed: %s, trying v3...", symbol, e)
+            
+            # Fallback to v3
+            try:
+                url_v3 = f"{self.DATA_BASE_URL}/market-quote/ltp"
+                resp = requests.get(url_v3, headers=self._data_headers(), params=params, timeout=10)
+                resp.raise_for_status()
+                data = resp.json()
+                response_key = symbol.replace("|", ":")
+                return float(data["data"][response_key]["last_price"])
+            except Exception as e2:
+                logger.error("get_ltp(%s) failed on both v2 and v3: %s", symbol, e2)
+                return None
 
     def get_ohlcv(
         self,
@@ -321,9 +333,102 @@ class UpstoxAdapter(BrokerAdapter):
     def get_option_chain(self, instrument: str, expiry: Optional[str] = None) -> list:
         """
         Fetch option chain for an instrument.
-        Implementation deferred — not needed for backtest (Stage 1).
+        
+        Returns list of option contracts with their instrument keys.
+        Used to look up real option LTPs during live/paper trading.
         """
-        raise NotImplementedError("get_option_chain() not yet implemented.")
+        # For now, we'll implement a simpler approach:
+        # Use the instrument master JSON to build lookup table
+        raise NotImplementedError("Use get_option_ltp() instead for live premiums.")
+
+    def get_option_quote(
+        self,
+        instrument: str,
+        strike: float,
+        option_type: str,  # "CE" or "PE"
+        expiry_date: str,  # ISO format "2026-08-13"
+    ) -> Optional[dict]:
+        """
+        Fetch real LTP + bid/ask for a specific option via option chain endpoint.
+        
+        This is the CORRECT way to get option premiums from Upstox.
+        The instrument_key for options is an opaque exchange token (e.g., "NSE_FO|37590"),
+        NOT a constructed string. We must query the option chain to get it.
+        
+        Args:
+            instrument: e.g. "NIFTY"
+            strike: e.g. 24350
+            option_type: "CE" or "PE"
+            expiry_date: ISO date string "2026-08-13"
+        
+        Returns:
+            {
+                "instrument_key": "NSE_FO|37590",  # Real Upstox token
+                "ltp": 126.50,
+                "bid": 126.25,
+                "ask": 126.75,
+                "oi": 1234567,
+            }
+            or None if not found
+        """
+        # Map instrument to Upstox underlying key
+        underlying_map = {
+            "NIFTY": "NSE_INDEX|Nifty 50",
+            "BANKNIFTY": "NSE_INDEX|Nifty Bank",
+        }
+        
+        underlying_key = underlying_map.get(instrument)
+        if not underlying_key:
+            logger.error("Unknown instrument: %s", instrument)
+            return None
+        
+        # Upstox option chain endpoint (v2 - this one works differently than market-quote)
+        url = "https://api.upstox.com/v2/option/chain"
+        params = {
+            "instrument_key": underlying_key,
+            "expiry_date": expiry_date,
+        }
+        
+        try:
+            resp = requests.get(url, headers=self._data_headers(), params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+            
+            # Search for matching strike
+            for row in data:
+                if abs(row["strike_price"] - strike) < 0.01:  # Float comparison tolerance
+                    # Get the correct leg (CE or PE)
+                    leg = row["call_options"] if option_type == "CE" else row["put_options"]
+                    md = leg.get("market_data", {})
+                    
+                    result = {
+                        "instrument_key": leg["instrument_key"],
+                        "ltp": md.get("ltp", 0.0),
+                        "bid": md.get("bid_price", 0.0),
+                        "ask": md.get("ask_price", 0.0),
+                        "oi": md.get("oi", 0),
+                    }
+                    
+                    logger.debug(
+                        "Option quote: %s %s %.0f %s | LTP=₹%.2f Bid=₹%.2f Ask=₹%.2f",
+                        instrument, expiry_date, strike, option_type,
+                        result["ltp"], result["bid"], result["ask"]
+                    )
+                    
+                    return result
+            
+            logger.warning(
+                "Strike %.0f not found in option chain for %s %s %s",
+                strike, instrument, expiry_date, option_type
+            )
+            return None
+            
+        except Exception as e:
+            logger.error(
+                "Failed to fetch option chain for %s %s: %s",
+                instrument, expiry_date, e
+            )
+            return None
 
     def get_option_contract(
         self,

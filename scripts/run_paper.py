@@ -136,16 +136,47 @@ class PaperTradingEngine:
         setup = signal.metadata["setup"]
         direction = signal.direction
         
-        # Calculate entry premium for position sizing
-        direction_str = "LONG" if direction == SignalDirection.LONG else "SHORT"
-        dummy_leg = self.pricer.price_trade(
-            direction=direction_str,
-            entry_spot=entry_price,
-            entry_time=bar_time,
-            exit_spot=entry_price,
-            exit_time=bar_time,
+        # Determine option contract details
+        from src.backtest.options_pricer import atm_strike, next_expiry
+        strike = atm_strike(entry_price, self.pricer.strike_step)
+        option_type_str = "CE" if direction == SignalDirection.LONG else "PE"
+        expiry_date = next_expiry(bar_time.date(), self.pricer.expiry_weekday)
+        contract_symbol = f"NIFTY {expiry_date.strftime('%d%b%y').upper()} {strike:.0f} {option_type_str}"
+        
+        # Fetch REAL option quote (LTP + bid/ask) from Upstox
+        quote = self.adapter.get_option_quote(
+            instrument="NIFTY",
+            strike=strike,
+            option_type=option_type_str,
+            expiry_date=expiry_date.isoformat(),
         )
-        entry_premium = dummy_leg.entry_premium
+        
+        if quote and quote["ask"] > 0:
+            # Use ASK price for buying (realistic fill cost)
+            entry_premium = quote["ask"]
+            premium_source = "REAL ASK"
+            logger.info(
+                "Real option quote: LTP=₹%.2f Bid=₹%.2f Ask=₹%.2f (using Ask for entry)",
+                quote["ltp"], quote["bid"], quote["ask"]
+            )
+        elif quote and quote["ltp"] > 0:
+            # Fallback to LTP if bid/ask not available
+            entry_premium = quote["ltp"]
+            premium_source = "REAL LTP"
+            logger.warning("Bid/Ask not available, using LTP")
+        else:
+            # Final fallback to Black-Scholes if API completely fails
+            logger.warning("⚠️ Real option quote not available, using Black-Scholes estimate")
+            direction_str = "LONG" if direction == SignalDirection.LONG else "SHORT"
+            dummy_leg = self.pricer.price_trade(
+                direction=direction_str,
+                entry_spot=entry_price,
+                entry_time=bar_time,
+                exit_spot=entry_price,
+                exit_time=bar_time,
+            )
+            entry_premium = dummy_leg.entry_premium
+            premium_source = "BLACK-SCHOLES"
         
         # Calculate position size
         lots = self.calculate_position_size(signal, entry_premium)
@@ -159,20 +190,17 @@ class PaperTradingEngine:
         self.entry_time = bar_time
         self.entry_price = entry_price
         self.entry_premium = entry_premium
+        self.entry_strike = strike
+        self.entry_option_type = option_type_str
+        self.entry_expiry = expiry_date
+        self.premium_source = premium_source
         self.lots = lots
         self.current_stop = setup.initial_stop
         self.bars_in_trade = 0
         
-        # Determine option contract details
-        from src.backtest.options_pricer import atm_strike, next_expiry
-        strike = atm_strike(entry_price, self.pricer.strike_step)
-        option_type = "CALL" if direction == SignalDirection.LONG else "PUT"
-        expiry_date = next_expiry(bar_time.date(), self.pricer.expiry_weekday)
-        contract_symbol = f"NIFTY {expiry_date.strftime('%d%b%y').upper()} {strike:.0f} {option_type}"
-        
         logger.info(
-            "📈 PAPER ENTRY: %s %d lots @ ₹%.2f | Premium=₹%.2f | Stop=₹%.2f | Capital=₹%.2f | Contract=%s",
-            direction, lots, entry_price, entry_premium, self.current_stop, self.capital, contract_symbol
+            "📈 PAPER ENTRY: %s %d lots @ ₹%.2f | Premium=₹%.2f (%s) | Stop=₹%.2f | Capital=₹%.2f | Contract=%s",
+            direction, lots, entry_price, entry_premium, premium_source, self.current_stop, self.capital, contract_symbol
         )
         
         # Send Telegram alert
@@ -182,7 +210,7 @@ class PaperTradingEngine:
             f"Direction: {direction.name}\n"
             f"Lots: {lots}\n"
             f"Spot: ₹{entry_price:.2f}\n"
-            f"Premium: ₹{entry_premium:.2f}\n"
+            f"Premium: ₹{entry_premium:.2f} ({premium_source})\n"
             f"Stop: ₹{self.current_stop:.2f}\n"
             f"Capital: ₹{self.capital:.2f}\n"
             f"Time: {bar_time.strftime('%H:%M')}"
@@ -195,23 +223,55 @@ class PaperTradingEngine:
             return
         
         direction = self.active_position.direction
-        direction_str = "LONG" if direction == SignalDirection.LONG else "SHORT"
         setup = self.active_position.metadata["setup"]
         zone = setup.zone
+        lot_size = self.pricer.lot_size
         
-        # Calculate P&L
-        leg = self.pricer.price_trade(
-            direction=direction_str,
-            entry_spot=self.entry_price,
-            entry_time=self.entry_time,
-            exit_spot=exit_price,
-            exit_time=bar_time,
+        # Fetch REAL exit quote (use BID for selling)
+        quote = self.adapter.get_option_quote(
+            instrument="NIFTY",
+            strike=self.entry_strike,
+            option_type=self.entry_option_type,
+            expiry_date=self.entry_expiry.isoformat(),
         )
         
-        gross_pnl = leg.pnl_rupees * self.lots
+        if quote and quote["bid"] > 0:
+            # Use BID price for selling (realistic fill)
+            exit_premium = quote["bid"]
+            exit_source = "REAL BID"
+            logger.info(
+                "Real exit quote: LTP=₹%.2f Bid=₹%.2f Ask=₹%.2f (using Bid for exit)",
+                quote["ltp"], quote["bid"], quote["ask"]
+            )
+        elif quote and quote["ltp"] > 0:
+            exit_premium = quote["ltp"]
+            exit_source = "REAL LTP"
+            logger.warning("Bid/Ask not available for exit, using LTP")
+        else:
+            # Fallback to Black-Scholes
+            logger.warning("⚠️ Real exit quote not available, using Black-Scholes estimate")
+            direction_str = "LONG" if direction == SignalDirection.LONG else "SHORT"
+            leg = self.pricer.price_trade(
+                direction=direction_str,
+                entry_spot=self.entry_price,
+                entry_time=self.entry_time,
+                exit_spot=exit_price,
+                exit_time=bar_time,
+            )
+            exit_premium = leg.exit_premium
+            exit_source = "BLACK-SCHOLES"
+        
+        # Calculate P&L (buying premium, so profit when premium decreases for SHORT)
+        if direction == SignalDirection.SHORT:
+            # SHORT = buy PUT, profit when PUT premium drops
+            premium_change = self.entry_premium - exit_premium
+        else:
+            # LONG = buy CALL, profit when CALL premium rises
+            premium_change = exit_premium - self.entry_premium
+        
+        gross_pnl = premium_change * lot_size * self.lots
         
         # Transaction costs
-        lot_size = self.pricer.lot_size
         tx_cost = (40.0 + self.entry_premium * 0.0015 * lot_size + 5.0) * self.lots
         net_pnl = gross_pnl - tx_cost
         
@@ -219,11 +279,7 @@ class PaperTradingEngine:
         self.capital += net_pnl
         
         # Get contract details for logging
-        from src.backtest.options_pricer import atm_strike, next_expiry
-        strike = atm_strike(self.entry_price, self.pricer.strike_step)
-        option_type = "CALL" if direction == SignalDirection.LONG else "PUT"
-        expiry_date = next_expiry(self.entry_time.date(), self.pricer.expiry_weekday)
-        contract_symbol = f"NIFTY {expiry_date.strftime('%d%b%y').upper()} {strike:.0f} {option_type}"
+        contract_symbol = f"NIFTY {self.entry_expiry.strftime('%d%b%y').upper()} {self.entry_strike:.0f} {self.entry_option_type}"
         
         # Record trade
         hold_minutes = (bar_time - self.entry_time).total_seconds() / 60
@@ -234,7 +290,9 @@ class PaperTradingEngine:
             "entry_price": self.entry_price,
             "exit_price": exit_price,
             "entry_premium": self.entry_premium,
-            "exit_premium": leg.exit_premium,
+            "entry_source": getattr(self, 'premium_source', 'UNKNOWN'),
+            "exit_premium": exit_premium,
+            "exit_source": exit_source,
             "lots": self.lots,
             "gross_pnl": gross_pnl,
             "tx_cost": tx_cost,
@@ -247,9 +305,9 @@ class PaperTradingEngine:
         self.trades.append(trade)
         
         logger.info(
-            "📉 PAPER EXIT: %s | %s | P&L=₹%.2f (%.1f%%) | Reason=%s | Hold=%.1fmin | Capital=₹%.2f",
+            "📉 PAPER EXIT: %s | %s | P&L=₹%.2f (%.1f%%) | Entry=%s Exit=%s | Reason=%s | Hold=%.1fmin | Capital=₹%.2f",
             contract_symbol, direction, net_pnl, (net_pnl / (self.entry_premium * lot_size * self.lots)) * 100,
-            exit_reason, hold_minutes, self.capital
+            getattr(self, 'premium_source', '?'), exit_source, exit_reason, hold_minutes, self.capital
         )
         
         # Send Telegram alert
@@ -260,7 +318,8 @@ class PaperTradingEngine:
             f"Contract: <b>{contract_symbol}</b>\n"
             f"Direction: {direction.name}\n"
             f"P&L: ₹{net_pnl:.2f} ({pnl_pct:+.1f}%)\n"
-            f"Entry: ₹{self.entry_premium:.2f} → Exit: ₹{leg.exit_premium:.2f}\n"
+            f"Entry: ₹{self.entry_premium:.2f} ({getattr(self, 'premium_source', '?')})\n"
+            f"Exit: ₹{exit_premium:.2f} ({exit_source})\n"
             f"Reason: {exit_reason}\n"
             f"Hold: {hold_minutes:.1f} min\n"
             f"Capital: ₹{self.capital:.2f}\n"
@@ -277,6 +336,10 @@ class PaperTradingEngine:
         self.entry_time = None
         self.entry_price = None
         self.entry_premium = None
+        self.entry_strike = None
+        self.entry_option_type = None
+        self.entry_expiry = None
+        self.premium_source = None
         self.lots = 0
         self.current_stop = None
         self.bars_in_trade = 0
