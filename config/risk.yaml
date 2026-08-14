@@ -20,11 +20,10 @@ per_trade:
   max_loss_per_trade_pct: 2.5
 
   # Max % of CURRENT running capital allowed to be deployed across open
-  # positions at once. NOTE: your old YAML said 50%, your old code enforced
-  # 10% — these disagreed. Pick one deliberately; 10% is what's already been
-  # running during your live paper test, so it's the safer default unless
-  # you have a specific reason to raise it.
-  max_capital_deployed_pct: 10.0
+  # positions at once. 25% allows more aggressive position sizing while
+  # maintaining reasonable risk control. At ₹2L capital with ₹100 premium,
+  # this allows ~7 lots vs 3 lots with 10%.
+  max_capital_deployed_pct: 25.0
 
 circuit_breaker:
   # % of DAY-START capital (frozen at session start, not continuously

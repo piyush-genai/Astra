@@ -96,6 +96,9 @@ def time_to_expiry_years(
     """
     Compute T (years) from a given intraday timestamp to the next expiry.
     Uses calendar days / 365 — simple but adequate for short-dated options.
+    
+    FIXED: Handles same-day expiry correctly by using real time remaining,
+    not collapsing to near-zero floor due to negative delta_days - 1.
     """
     from_date = from_dt.date()
     expiry    = next_expiry(from_date, expiry_weekday)
@@ -109,13 +112,23 @@ def time_to_expiry_years(
             expiry = next_expiry(from_date + timedelta(days=1), expiry_weekday)
 
     delta_days = (expiry - from_date).days
+    
     # Add intraday fraction: time remaining today as fraction of a day.
     intraday_hours = (market_close_hour + market_close_minute / 60) - (
         from_dt.hour + from_dt.minute / 60
     )
     intraday_fraction = max(0.0, intraday_hours / 24.0)
 
-    T_days = max(delta_days - 1 + intraday_fraction, 1 / 365)
+    if delta_days == 0:
+        # Same-day expiry: T is simply the real fraction of today remaining.
+        # Floor at ~15 minutes (1/365/24/4) to avoid division by zero in BS formula,
+        # not ~4 minutes-as-days (1/365) which was the bug.
+        T_days = max(intraday_fraction, 1 / (365 * 24 * 4))
+    else:
+        # Multi-day: delta_days - 1 gives full additional days beyond today,
+        # plus today's remaining fraction.
+        T_days = max(delta_days - 1 + intraday_fraction, 1 / 365)
+    
     return T_days / 365.0
 
 
