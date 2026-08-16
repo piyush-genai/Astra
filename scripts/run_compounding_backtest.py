@@ -453,9 +453,10 @@ def main():
         print(f"  CONFIGURATION: {selected_config['name']}")
         print(f"  {selected_config['description']}")
         print(f"  ")
-        print(f"  NOTE: Position sizing with CONSERVATIVE limits:")
-        print(f"       - Max 10 lots per trade (exchange freeze limit ~36, using 10 for safety)")
-        print(f"       - Max 10% capital deployed per trade (2% risk per trade)")
+        print(f"  NOTE: Position sizing uses risk.yaml config:")
+        print(f"       - Risk per trade: {risk_cfg['per_trade']['max_loss_per_trade_pct']}%")
+        print(f"       - Max capital deployed: {risk_cfg['per_trade']['max_capital_deployed_pct']}%")
+        print(f"       - Hard cap lots: {risk_cfg['position_limits']['hard_cap_lots']} (exchange freeze limit ~36)")
         print(f"       - Stop trading if capital exhausted")
         print("=" * 120)
     
