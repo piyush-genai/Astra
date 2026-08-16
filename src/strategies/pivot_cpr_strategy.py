@@ -385,7 +385,7 @@ class PivotCprStrategy(BaseStrategy):
         
         # Relaxed threshold: need only 1 strong criterion + zone break
         # (since we don't have volume, we're more aggressive)
-        if score < 1:
+        if score < self._momentum_min_criteria:
             return None  # Not enough momentum
         
         # Check if this bar broke through any zone
@@ -410,14 +410,15 @@ class PivotCprStrategy(BaseStrategy):
                 score += 1
             
             # MOMENTUM BREAKOUT CONFIRMED (need 2+ of 3 criteria)
-            if score >= 2:
+            if score >= self._momentum_min_criteria:
                 direction = SignalDirection.LONG if broke_up else SignalDirection.SHORT
                 
-                # Tighter stop for momentum trades - 50% retracement of breakout candle
+                # Tighter stop for momentum trades - low/high of breakout candle
+                # (entry fills at next bar's open, so stop must be BELOW low, not at midpoint)
                 if direction == SignalDirection.LONG:
-                    initial_stop = bar["low"] + 0.5 * (bar["close"] - bar["low"])
+                    initial_stop = bar["low"]
                 else:
-                    initial_stop = bar["high"] - 0.5 * (bar["high"] - bar["close"])
+                    initial_stop = bar["high"]
                 
                 target = zone_above(zones, zone.price_high) if broke_up else zone_below(zones, zone.price_low)
                 

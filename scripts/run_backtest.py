@@ -105,6 +105,25 @@ def main() -> None:
     if ohlcv_1min is None or ohlcv_1min.empty:
         logger.error("No data returned from adapter. Aborting.")
         return
+    
+    # Fetch DAILY data for pivot calculation (lookback 90 days)
+    from datetime import datetime, timedelta
+    start_dt = datetime.strptime(args.from_date, "%Y-%m-%d")
+    pivot_from_date = (start_dt - timedelta(days=90)).strftime("%Y-%m-%d")
+    
+    daily_ohlcv = adapter.get_ohlcv(
+        symbol="NSE_INDEX|Nifty 50",
+        interval="day",
+        from_date=pivot_from_date,
+        to_date=args.to_date,
+    )
+    
+    if daily_ohlcv is None or daily_ohlcv.empty:
+        logger.warning("Failed to fetch daily data for pivots - backtest will have NaN pivots!")
+    else:
+        # Inject daily OHLCV into strategy for pivot calculation
+        strategy._daily_ohlc = daily_ohlcv
+        logger.info(f"✓ Injected {len(daily_ohlcv)} days of historical data for pivot calculation")
 
     ohlcv = ohlcv_1min.resample("5min").agg({
         "open":   "first",
