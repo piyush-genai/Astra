@@ -101,15 +101,23 @@ pip install -r requirements.txt
 ```bash
 # On EC2:
 cd ~/atlas
+
+# Copy the template
+cp .env.example .env
+
+# Edit with your actual credentials
 nano .env  # Or use vim
 
-# Add these (get from your laptop's .env):
-UPSTOX_SANDBOX_API_KEY=your_key_here
-UPSTOX_SANDBOX_API_SECRET=your_secret_here
-UPSTOX_SANDBOX_REDIRECT_URI=your_redirect_uri
-UPSTOX_ANALYTICS_TOKEN=your_analytics_token
+# Fill in your credentials from Upstox developer portal:
+# - UPSTOX_ANALYTICS_TOKEN (from Analytics tab)
+# - UPSTOX_SANDBOX_* credentials (from Sandbox tab)
+# - TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (optional)
 
 # Save and exit (Ctrl+X, Y, Enter)
+
+# Verify .env is not tracked by Git
+git check-ignore .env
+# Should output: .env
 ```
 
 ### 8. Test Paper Trading
