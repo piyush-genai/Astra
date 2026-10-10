@@ -279,6 +279,7 @@ class UpstoxAdapter(BrokerAdapter):
         """v3 historical endpoint — for any date range that is not today."""
         interval_map = {
             "1minute":  ("minutes", "1"),
+            "5minute":  ("minutes", "5"),
             "30minute": ("minutes", "30"),
             "day":      ("days", "1"),
             "week":     ("days", "7"),
