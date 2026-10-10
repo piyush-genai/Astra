@@ -72,33 +72,42 @@ Floor: 1 lot minimum
 
 ---
 
-## 5. Reported Backtest Performance (user-reported, Feb–Jul 2026)
+## 5. Backtest Performance — EXP-0001 Result (2026-10-10)
 
-> ⚠️ These numbers are USER-REPORTED and have not been independently reproduced from data.
-> Reproduction task is tracked as EXP-0001.
+> EXP-0001 COMPLETED. The original +4,026% figure was NOT reproducible.
+> Two bugs in the original code inflated both trade count and P&L.
+> The CORRECTED baseline is now the authoritative reference.
 
-| Metric | Value |
-|---|---|
-| Starting capital | ₹20,000 |
-| Ending capital | ₹8,25,266 |
-| Total return | +4,026% |
-| Period | Feb 1 – Jul 31, 2026 (6 months) |
-| Total trades | 1,302 |
-| Win rate | 25.4% |
-| Avg trades/day | 9.9 |
+### Corrected Baseline (Version 3 — current code, fixed bugs)
 
-### Monthly breakdown
 | Month | Start | End | Return | Note |
 |---|---|---|---|---|
-| Feb 2026 | ₹20,000 | ₹73,257 | +266% | |
-| Mar 2026 | ₹73,257 | ₹3,29,558 | +350% | **Outlier — investigate** |
-| Apr 2026 | ₹3,29,558 | ₹4,82,695 | +46% | |
-| May 2026 | ₹4,82,695 | ₹5,87,611 | +22% | |
-| Jun 2026 | ₹5,87,611 | ₹7,65,254 | +30% | |
-| Jul 2026 | ₹7,65,254 | ₹8,25,266 | +8% | Return slowdown |
+| Feb 2026 | ₹20,000 | ₹12,555 | **-37.2%** | Losing month |
+| Mar 2026 | ₹12,555 | ₹53,020 | **+322.3%** | Outlier — EXP-0002 |
+| Apr 2026 | ₹53,020 | ₹58,782 | +10.9% | |
+| May 2026 | ₹58,782 | ₹51,710 | -12.0% | Losing month |
+| Jun 2026 | ₹51,710 | ₹78,014 | +50.9% | |
+| Jul 2026 | ₹78,014 | ₹95,270 | +22.1% | |
 
-**Critical observation**: March 2026 generated ~₹2,56,000 (50%+ of total profit in one month).
-**Primary research question**: What was different about March?
+**Corrected total**: ₹20,000 → ₹95,270 (+376%) | 532 trades | 32.1% win rate
+
+### Bugs Found by EXP-0001
+
+| Bug | Effect | Fixed commit |
+|---|---|---|
+| Options pricer: expiry-day T collapse | ATM options priced at ₹1-₹3 instead of ₹25-₹35 on expiry morning; top 3 trades overstated by ~₹15k-₹35k each | `edbcfcd` |
+| Momentum stop: midpoint instead of candle low | 2.6× trade count inflation (270→103/month) from rapid stop-out/re-entry cycles | `0a3a483` |
+
+### Historical Versions (for reference only)
+
+| Version | End Capital | Return | Trades | Status |
+|---|---|---|---|---|
+| User-reported (paper logs) | ₹8,25,266 | +4,026% | 1,302 | Superseded |
+| Old CSV backtest (two bugs) | ₹8,56,926 | +4,185% | 1,772 | Superseded |
+| **Current code (corrected)** | **₹95,270** | **+376%** | **532** | **Authoritative** |
+
+**Key finding**: The strategy still shows a REAL edge (+376%) after fixing both bugs.
+March 2026 remains an outlier even in the corrected run — EXP-0002 investigates why.
 
 ---
 

@@ -36,9 +36,9 @@
 - [ ] Feature store (Phase 6)
 
 ### Baseline
-- [ ] **EXP-0001**: Reproduce ATLAS backtest result
+- [x] **EXP-0001**: Reproduce ATLAS backtest result — COMPLETED (2026-10-10)
 - [ ] **EXP-0002**: March 2026 forensic analysis
-- [x] git tag: `atlas-baseline-v1` (pending commit)
+- [x] git tag: `atlas-baseline-v1`
 
 ### Tests
 - [x] 92 tests passing (0 failures)
@@ -47,10 +47,10 @@
 
 ## Active Experiments
 
-| ID | Hypothesis | Status | Priority |
-|---|---|---|---|
-| EXP-0001 | Reproduce ATLAS baseline | PROPOSED | CRITICAL |
-| EXP-0002 | March 2026 forensic analysis | PROPOSED | HIGH |
+| ID | Hypothesis | Status | Priority | Result |
+|---|---|---|---|---|
+| EXP-0001 | Reproduce ATLAS baseline | COMPLETED | CRITICAL | +376% (₹95k) — bugs found, baseline corrected |
+| EXP-0002 | March 2026 forensic analysis | PROPOSED | HIGH | — |
 
 ---
 
