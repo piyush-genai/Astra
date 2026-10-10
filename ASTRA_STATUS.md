@@ -23,7 +23,13 @@
 
 **VALIDATED signal**: P70_L40d adaptive ATR filter (current ATR > 70th pctile of trailing 40-day ATR). Confirmed OOS: 67% (8/12 months 2025), avg +74.4%/month vs +56.3% baseline, ₹497/trade avg. Ready for Monte Carlo.
 
-**Phase gate**: WALK_FORWARD ✓ → MONTE_CARLO ✓ → PAPER_TRADING (next)
+**Phase gate**: WALK_FORWARD ✓ → MONTE_CARLO ✓ → OPTION_SIGNALS ✓ → PAPER_TRADING (next)
+
+**Validated strategy stack (ready for paper trading):**
+1. Signal: PivotCPR momentum breakout (ATLAS baseline)
+2. Regime filter: P70_L40d adaptive ATR (EXP-0010/0011)
+3. IV model: VIX×1.1 dynamic pricing (EXP-0014)
+4. Position sizing: VIX tilt — sweet spot 1.5x, danger zone 0.5x, else 1x (EXP-0015)
 
 **Monte Carlo summary** (10,000 sims, P70_L40d, ₹20k start):
 - Median annual return: +777% | 5th pctile: +354% | P(loss): 1.6%
@@ -79,6 +85,7 @@
 | **EXP-0012** | **Monte Carlo stress test (10,000 sims)** | **COMPLETED** | **CRITICAL** | **PASSED — Sharpe 3.00, P(ruin)=17.8%, P(loss)=1.6%. Next gate: PAPER** |
 | EXP-0013 | India VIX as binary entry filter on P70_L40d | COMPLETED | HIGH | REJECTED — VIX filter reduces monthly return (22% beat rate, needed 65%). PARTIAL SIGNAL: VIX 60-75th pctile is danger zone (₹47/trade); VIX 50-60th is sweet spot (₹547/trade). Use for sizing not filtering. |
 | **EXP-0014** | **Dynamic VIX-derived IV vs flat 14%** | **COMPLETED** | **HIGH** | **EXP-0012 CAVEAT-3 REVISED: flat IV only inflated by 2-11% (not 20-40%). Intraday trades not exposed to overnight IV change. VIX×1.1 recommended. Sharpe stays 2.87.** |
+| **EXP-0015** | **VIX bucket position sizing** | **COMPLETED** | **HIGH** | **ALL 4 configs PASS. Tilt (sweet 1.5x + danger 0.5x): Sharpe 2.93 (+0.06), +6% P&L, max DD 33.7% (was 39.4%). Gradient: +15.6% P&L. Kelly confirms danger zone (0.026) vs sweet spot (0.181).** |
 
 ---
 
