@@ -1,0 +1,96 @@
+{
+  "exp_id": "EXP-0013",
+  "hypothesis": "Layering India VIX percentile as an entry filter on top of the validated P70_L40d ATR regime filter improves trade quality — trades entered at low relative VIX (cheap options) or medium VIX outperform trades entered at high VIX.",
+  "status": "COMPLETED",
+  "created_at": "2026-10-10T19:00:00.000000",
+  "updated_at": "2026-10-10T19:30:00.000000",
+  "dataset_version": "nifty-5min-2023-2025 (DATA-001) + india_vix_daily_20230101_to_20251231",
+  "base_filter": "P70_L40d adaptive ATR (validated in EXP-0010, EXP-0011)",
+  "vix_data": {
+    "source": "Upstox Analytics API — NSE_INDEX|India VIX",
+    "period": "Jan 2023 – Dec 2025",
+    "bars": 744,
+    "range": "9.2 – 26.8",
+    "mean": 13.5
+  },
+  "method": "Three VIX percentile bucket configs layered on top of ATR filter. VIX percentile computed as rolling 40-day lookback (same as ATR filter). Configs: LOW (<P40), MEDIUM (P30-P70), HIGH (>P60). Success criterion: filtered config beats ATR baseline in >= 65% of months.",
+  "configs_tested": [
+    {"name": "ATR only (baseline)",      "description": "P70_L40d filter only (validated config)"},
+    {"name": "ATR + VIX low (<P40)",     "description": "Only trade when VIX is in bottom 40% of recent range"},
+    {"name": "ATR + VIX medium (P30-P70)", "description": "Only trade when VIX is in middle 40% of range"},
+    {"name": "ATR + VIX high (>P60)",   "description": "Only trade when VIX is in top 40% of recent range"}
+  ],
+  "results": {
+    "baseline": {
+      "avg_return_pct_per_month": 52.7,
+      "avg_trades_per_month": 33,
+      "avg_pnl_per_trade": 285
+    },
+    "vix_low": {
+      "months_beating_baseline": "8/36 (22%)",
+      "pass_threshold_65pct": false,
+      "avg_return_pct_per_month": 21.7,
+      "avg_trades_per_month": 8,
+      "avg_pnl_per_trade": 299,
+      "return_lift_vs_baseline": -31.0
+    },
+    "vix_medium": {
+      "months_beating_baseline": "8/36 (22%)",
+      "pass_threshold_65pct": false,
+      "avg_return_pct_per_month": 6.8,
+      "avg_trades_per_month": 6,
+      "avg_pnl_per_trade": 169,
+      "return_lift_vs_baseline": -45.9
+    },
+    "vix_high": {
+      "months_beating_baseline": "8/36 (22%)",
+      "pass_threshold_65pct": false,
+      "avg_return_pct_per_month": 17.7,
+      "avg_trades_per_month": 15,
+      "avg_pnl_per_trade": 166,
+      "return_lift_vs_baseline": -35.1
+    }
+  },
+  "vix_bucket_analysis": {
+    "description": "Per-trade P&L breakdown by VIX percentile at entry, within the full ATR-filtered 1,522-trade universe",
+    "total_trades": 1522,
+    "vix_range_at_entry": "9.2 – 26.8 (mean 13.8)",
+    "buckets": {
+      "below_20th_pctile": {"trades": 333, "win_rate_pct": 31, "avg_pnl": 325, "total_pnl": 108072, "label": "Very low VIX — cheapest options"},
+      "20th_to_30th":      {"trades": 112, "win_rate_pct": 36, "avg_pnl": 312, "total_pnl": 34994},
+      "30th_to_40th":      {"trades": 93,  "win_rate_pct": 30, "avg_pnl": 227, "total_pnl": 21104},
+      "40th_to_50th":      {"trades": 105, "win_rate_pct": 36, "avg_pnl": 377, "total_pnl": 39548},
+      "50th_to_60th":      {"trades": 126, "win_rate_pct": 32, "avg_pnl": 547, "total_pnl": 68971, "label": "BEST bucket — sweet spot"},
+      "60th_to_75th":      {"trades": 216, "win_rate_pct": 25, "avg_pnl": 47,  "total_pnl": 10154, "label": "DANGER ZONE — worst bucket"},
+      "above_75th_pctile": {"trades": 537, "win_rate_pct": 29, "avg_pnl": 355, "total_pnl": 190728, "label": "Very high VIX — strategy still works"}
+    }
+  },
+  "findings": {
+    "FINDING-1": {
+      "title": "VIX as a BINARY FILTER consistently hurts performance",
+      "detail": "All three VIX bucket filters fail: 22% win rate against baseline (needed 65%). Avg monthly return drops from +52.7% to +6.8–21.7%. Root cause is not that per-trade quality falls — it's that filtering by VIX bucket drastically reduces trade count (from 33/month to 6–15/month), compressing total monthly P&L even when individual trades are slightly better."
+    },
+    "FINDING-2": {
+      "title": "VIX 60–75th percentile is a clear DANGER ZONE",
+      "detail": "216 trades entered in the 60-75th VIX percentile produce only ₹47/trade avg P&L (vs ₹285 baseline) and just 25% win rate. This is the worst of all 7 buckets by a large margin. Interpretation: this range is expensive enough to hurt (IV crush risk) but not so high as to confirm a strong volatility regime. It's the 'neither here nor there' zone."
+    },
+    "FINDING-3": {
+      "title": "VIX 50–60th percentile is the SWEET SPOT",
+      "detail": "126 trades in the 50-60th VIX percentile produce ₹547/trade avg P&L (92% above baseline ₹285) and 32% win rate. This suggests that slightly above-median VIX — expensive enough to indicate real volatility expectation, but not so elevated as to cause IV crush — produces the best options trades for this strategy."
+    },
+    "FINDING-4": {
+      "title": "Very high VIX (>75th pctile) still works well",
+      "detail": "537 trades at VIX >75th percentile produce ₹355/trade avg (25% above baseline). High VIX periods confirm strong volatility, and despite expensive option premiums, the strategy captures outsized moves. The ATR filter already captures this: when ATR is in the top 30% of recent history, VIX tends to also be elevated."
+    },
+    "FINDING-5": {
+      "title": "VIX and ATR regime filter are partially correlated",
+      "detail": "When ATR is high (P70_L40d regime active), VIX also tends to be elevated. Adding a VIX LOW filter on top of ATR HIGH creates contradictory conditions (few bars satisfy both), which is why the trade count drops to ~8/month. The two signals are not independent."
+    }
+  },
+  "conclusion": "HYPOTHESIS REJECTED. VIX as a binary entry filter consistently hurts performance: all three configs fail (22% win rate, need 65%). The core problem is that VIX and ATR are correlated — when ATR says 'trade', VIX also tends to be elevated, so restricting by VIX bucket creates contradictory conditions that dramatically reduce trade count without proportional quality improvement.\n\nHOWEVER, the VIX bucket analysis reveals a genuine partial signal: the 60-75th percentile VIX range is a demonstrable 'danger zone' (₹47/trade, 25% win rate vs ₹285/trade baseline). Future research should investigate SIZING MODULATION based on VIX bucket rather than binary filtering — reduce position size in the 60-75th bucket, maintain or increase in the 50-60th bucket sweet spot.\n\nThe flat 14% IV assumption in the options pricer means real-market IV effects are not fully captured here. EXP-0014 (replacing flat IV with actual VIX-derived IV) would provide a more accurate test of VIX's impact.",
+  "next_experiments": [
+    "EXP-0014: VIX-derived dynamic IV in options pricer (replace flat 14% with VIX/sqrt(365)*adjustments)",
+    "EXP-0015: Position sizing modulation by VIX bucket (reduce 60-75th pctile, increase 50-60th pctile)",
+    "EXP-0016: Open Interest as entry filter (requires historical OI data — separate data acquisition)"
+  ]
+}
