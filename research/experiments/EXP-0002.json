@@ -1,0 +1,29 @@
+{
+  "exp_id": "EXP-0002",
+  "hypothesis": "March 2026 generated ~\u20b9256k profit (~50% of 6-month total) due to a specific market regime (high IV, strong trend, volatility expansion) that is identifiable in feature space and repeatable.",
+  "status": "PROPOSED",
+  "created_at": "2026-10-10T12:29:49.350744",
+  "updated_at": "2026-10-10T12:29:49.350744",
+  "git_commit": "7eacc16",
+  "strategy": "pivot_cpr_strategy",
+  "dataset_version": "nifty-5min-2026-feb-mar",
+  "train_range": [
+    "2026-02-01",
+    "2026-02-28"
+  ],
+  "test_range": [
+    "2026-03-01",
+    "2026-03-31"
+  ],
+  "config": {
+    "tolerance_pct": 0.18,
+    "min_levels_for_confluence": 2,
+    "momentum_enabled": true
+  },
+  "notes": "Forensic analysis of March 2026 outlier. Analyze: ATR, IV percentile, OI change, trend strength, time-of-day, CE/PE split, trade duration. Determine if edge is regime-dependent.",
+  "metrics": {},
+  "conclusion": "",
+  "leakage_checked": false,
+  "walk_forward_done": false,
+  "monte_carlo_done": false
+}
