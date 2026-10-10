@@ -165,11 +165,21 @@ class TestFindZones:
         assert not zones[0].is_confluence
 
     def test_two_close_levels_form_confluence(self):
-        # 22250 and 22270 — difference ~0.09%, within 0.18%
-        s = self._make_series({"daily_P": 22250.0, "cpr_BC": 22270.0})
+        # daily_R1 (daily timeframe) and weekly_R1 (weekly timeframe) are independent sources.
+        # Two different timeframes within tolerance → confluence.
+        s = self._make_series({"daily_R1": 22250.0, "weekly_R1": 22270.0})
         zones = find_zones(s, tolerance_pct=0.18)
         assert len(zones) == 1
         assert zones[0].is_confluence
+
+    def test_daily_and_cpr_same_timeframe_not_confluence(self):
+        # daily_P and cpr_BC both derive from the same prior-day OHLC — one independent
+        # source, not two. Clustering them does NOT produce confluence.
+        s = self._make_series({"daily_P": 22250.0, "cpr_BC": 22270.0})
+        zones = find_zones(s, tolerance_pct=0.18)
+        assert len(zones) == 1
+        assert not zones[0].is_confluence
+        assert zones[0].is_daily_cpr_only
 
     def test_two_far_levels_in_separate_zones(self):
         s = self._make_series({"daily_P": 22000.0, "daily_R1": 22500.0})

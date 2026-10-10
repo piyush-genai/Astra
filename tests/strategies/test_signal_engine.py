@@ -85,7 +85,7 @@ class TestSignalEngine:
         import pandas as pd
         from core.data.indicators import LEVEL_COLUMNS
 
-        def fake_build_pivots(self_inner, history, today):
+        def fake_build_pivots(self_inner, history, today, **kwargs):
             row = {col: float("nan") for col in LEVEL_COLUMNS}
             row["daily_R1"]  = zone_price
             row["weekly_R1"] = zone_price + 5   # within 0.18% tolerance
@@ -117,7 +117,7 @@ class TestSignalEngine:
 
         from core.data.indicators import LEVEL_COLUMNS
 
-        def fake_build_pivots(self_inner, history, today):
+        def fake_build_pivots(self_inner, history, today, **kwargs):
             row = {col: float("nan") for col in LEVEL_COLUMNS}
             row["daily_R1"]  = zone_price
             row["weekly_R1"] = zone_price + 5
@@ -147,7 +147,7 @@ class TestSignalEngine:
 
         from core.data.indicators import LEVEL_COLUMNS
 
-        def fake_build_pivots(self_inner, history, today):
+        def fake_build_pivots(self_inner, history, today, **kwargs):
             row = {col: float("nan") for col in LEVEL_COLUMNS}
             row["daily_R1"]  = zone_price
             row["weekly_R1"] = zone_price + 5
@@ -176,7 +176,7 @@ class TestSignalEngine:
 
         from core.data.indicators import LEVEL_COLUMNS
 
-        def fake_build_pivots(self_inner, history, today):
+        def fake_build_pivots(self_inner, history, today, **kwargs):
             row = {col: float("nan") for col in LEVEL_COLUMNS}
             row["daily_S1"]  = zone_price
             row["weekly_S1"] = zone_price - 5   # within tolerance
