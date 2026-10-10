@@ -4,11 +4,11 @@ sys.path.insert(0, '/home/piyush/workspace/trading/atlas')
 os.chdir('/home/piyush/workspace/trading/atlas')
 
 from dotenv import load_dotenv
-from src.backtest.harness import BacktestHarness
-from src.backtest.options_pricer import OptionsPricer
-from src.strategies.pivot_cpr_strategy import PivotCprStrategy
-from src.broker.upstox_adapter import UpstoxAdapter
-from src.config_loader import load_instruments
+from backtest.harness import BacktestHarness
+from backtest.options_pricer import OptionsPricer
+from strategies.pivot_cpr_strategy import PivotCprStrategy
+from core.broker.upstox_adapter import UpstoxAdapter
+from core.config_loader import load_instruments
 import pandas as pd
 import logging
 

@@ -1,5 +1,5 @@
 """
-ExecutionEngine — the ONLY module allowed to import from src.broker.
+ExecutionEngine — the ONLY module allowed to import from core.broker.
 
 Responsibilities:
 - Receive signals from StrategyRegistry.
@@ -21,10 +21,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from src.broker.base_adapter import BrokerAdapter, OrderRequest, OrderSide, OrderType
-from src.engine.base_strategy import OptionType, Signal, SignalDirection
-from src.engine.position_manager import Position, PositionManager
-from src.engine.risk_manager import RiskManager
+from core.broker.base_adapter import BrokerAdapter, OrderRequest, OrderSide, OrderType
+from core.engine.base_strategy import OptionType, Signal, SignalDirection
+from core.engine.position_manager import Position, PositionManager
+from core.engine.risk_manager import RiskManager
 
 logger = logging.getLogger(__name__)
 

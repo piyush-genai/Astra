@@ -4,7 +4,7 @@ Base interface for all strategies.
 Rules:
 - Every strategy subclasses BaseStrategy and implements evaluate().
 - Strategies NEVER place orders, call the broker, or manage positions directly.
-- Strategies NEVER import from src.broker or src.engine.execution_engine.
+- Strategies NEVER import from core.broker or core.engine.execution_engine.
 """
 
 from __future__ import annotations

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Callable, Optional
 
-from src.broker.base_adapter import BrokerAdapter
+from core.broker.base_adapter import BrokerAdapter
 
 logger = logging.getLogger(__name__)
 

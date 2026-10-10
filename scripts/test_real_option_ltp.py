@@ -15,7 +15,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
-from src.broker.upstox_adapter import UpstoxAdapter
+from core.broker.upstox_adapter import UpstoxAdapter
 
 load_dotenv()
 

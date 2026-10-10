@@ -27,11 +27,11 @@ from dotenv import load_dotenv
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.backtest.options_pricer import OptionsPricer
-from src.broker.upstox_adapter import UpstoxAdapter
-from src.config_loader import load_instruments, load_risk
-from src.engine.base_strategy import MarketData, Signal, SignalDirection
-from src.strategies.pivot_cpr_strategy import PivotCprStrategy
+from backtest.options_pricer import OptionsPricer
+from core.broker.upstox_adapter import UpstoxAdapter
+from core.config_loader import load_instruments, load_risk
+from core.engine.base_strategy import MarketData, Signal, SignalDirection
+from strategies.pivot_cpr_strategy import PivotCprStrategy
 
 load_dotenv()
 logging.basicConfig(
@@ -203,7 +203,7 @@ class PaperTradingEngine:
         direction = signal.direction
         
         # Determine option contract details
-        from src.backtest.options_pricer import atm_strike, next_expiry
+        from backtest.options_pricer import atm_strike, next_expiry
         strike = atm_strike(entry_price, self.pricer.strike_step)
         option_type_str = "CE" if direction == SignalDirection.LONG else "PE"
         expiry_date = next_expiry(bar_time.date(), self.pricer.expiry_weekday)

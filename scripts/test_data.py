@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
-from src.broker.upstox_adapter import UpstoxAdapter
+from core.broker.upstox_adapter import UpstoxAdapter
 
 if __name__ == "__main__":
     config = {

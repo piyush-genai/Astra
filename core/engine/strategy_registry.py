@@ -14,7 +14,7 @@ import importlib
 import logging
 from typing import Dict, List, Optional, Type
 
-from src.engine.base_strategy import BaseStrategy, MarketData, Signal
+from core.engine.base_strategy import BaseStrategy, MarketData, Signal
 
 logger = logging.getLogger(__name__)
 

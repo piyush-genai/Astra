@@ -17,7 +17,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.engine.base_strategy import BaseStrategy, MarketData, Signal, SignalDirection
+from core.engine.base_strategy import BaseStrategy, MarketData, Signal, SignalDirection
 
 logger = logging.getLogger(__name__)
 

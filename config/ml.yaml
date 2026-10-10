@@ -1,0 +1,31 @@
+regime_detector:
+  model_type: random_forest        # options: random_forest, gradient_boosting, rule_based
+  n_estimators: 100
+  min_train_samples: 500
+  retrain_frequency_days: 7
+  confidence_threshold: 0.65       # below this, fall back to rule-based
+
+features:
+  atr_lookback: 20
+  adx_period: 14
+  vol_ratio_short: 5
+  vol_ratio_long: 20
+  skew_lookback: 20
+
+strategy_selector:
+  min_regime_samples: 50           # min trades in a regime before ML overrides the prior
+  performance_decay_factor: 0.95   # recent trades weighted more than old ones
+
+universe:
+  scan_interval_seconds: 300       # scan every 5 min (1 bar)
+  max_simultaneous_opportunities: 3
+  min_signal_confidence: 0.5
+  excluded_symbols: []             # add symbols to temporarily disable
+
+live:
+  pre_market_time: "09:00"
+  market_open: "09:15"
+  eod_close_time: "15:20"
+  market_close: "15:30"
+  health_check_interval_seconds: 300
+  dry_run: true                    # MUST be set to false explicitly to place real orders

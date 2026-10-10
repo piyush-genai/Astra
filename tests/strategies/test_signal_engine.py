@@ -12,8 +12,8 @@ Tests verify:
 import pandas as pd
 import pytest
 
-from src.engine.base_strategy import MarketData, SignalDirection
-from src.strategies.pivot_cpr_strategy import PivotCprStrategy
+from core.engine.base_strategy import MarketData, SignalDirection
+from strategies.pivot_cpr_strategy import PivotCprStrategy
 
 
 def _make_strategy() -> PivotCprStrategy:
@@ -83,7 +83,7 @@ class TestSignalEngine:
 
         # Monkeypatch _build_pivots to return a table with a known confluence zone.
         import pandas as pd
-        from src.data.indicators import LEVEL_COLUMNS
+        from core.data.indicators import LEVEL_COLUMNS
 
         def fake_build_pivots(self_inner, history, today):
             row = {col: float("nan") for col in LEVEL_COLUMNS}
@@ -115,7 +115,7 @@ class TestSignalEngine:
         strat = _make_strategy()
         zone_price = 22300.0
 
-        from src.data.indicators import LEVEL_COLUMNS
+        from core.data.indicators import LEVEL_COLUMNS
 
         def fake_build_pivots(self_inner, history, today):
             row = {col: float("nan") for col in LEVEL_COLUMNS}
@@ -145,7 +145,7 @@ class TestSignalEngine:
         strat = _make_strategy()
         zone_price = 22300.0
 
-        from src.data.indicators import LEVEL_COLUMNS
+        from core.data.indicators import LEVEL_COLUMNS
 
         def fake_build_pivots(self_inner, history, today):
             row = {col: float("nan") for col in LEVEL_COLUMNS}
@@ -174,7 +174,7 @@ class TestSignalEngine:
         strat = _make_strategy()
         zone_price = 22300.0
 
-        from src.data.indicators import LEVEL_COLUMNS
+        from core.data.indicators import LEVEL_COLUMNS
 
         def fake_build_pivots(self_inner, history, today):
             row = {col: float("nan") for col in LEVEL_COLUMNS}

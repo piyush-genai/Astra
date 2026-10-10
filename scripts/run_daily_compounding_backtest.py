@@ -13,10 +13,10 @@ from dotenv import load_dotenv
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.backtest.harness import BacktestHarness
-from src.broker.upstox_adapter import UpstoxAdapter
-from src.config_loader import load_instruments
-from src.strategies.pivot_cpr_strategy import PivotCprStrategy
+from backtest.harness import BacktestHarness
+from core.broker.upstox_adapter import UpstoxAdapter
+from core.config_loader import load_instruments
+from strategies.pivot_cpr_strategy import PivotCprStrategy
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

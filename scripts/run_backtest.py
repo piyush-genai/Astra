@@ -23,11 +23,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 load_dotenv()
 
-from src.backtest.harness import BacktestHarness
-from src.backtest.options_pricer import OptionsPricer
-from src.broker.upstox_adapter import UpstoxAdapter
-from src.config_loader import load_instruments, load_risk
-from src.strategies.pivot_cpr_strategy import PivotCprStrategy
+from backtest.harness import BacktestHarness
+from backtest.options_pricer import OptionsPricer
+from core.broker.upstox_adapter import UpstoxAdapter
+from core.config_loader import load_instruments, load_risk
+from strategies.pivot_cpr_strategy import PivotCprStrategy
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ def main() -> None:
         )
 
         # ── Determine zone type ───────────────────────────────────────────────
-        from src.backtest.options_pricer import next_expiry
+        from backtest.options_pricer import next_expiry
         is_expiry_day = (t.entry_time.date() == leg.expiry_date)
         
         # Zone classification

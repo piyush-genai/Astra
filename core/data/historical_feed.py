@@ -13,7 +13,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.broker.base_adapter import BrokerAdapter
+from core.broker.base_adapter import BrokerAdapter
 
 logger = logging.getLogger(__name__)
 

@@ -35,14 +35,14 @@ from typing import Optional
 
 import pandas as pd
 
-from src.data.indicators import (
+from core.data.indicators import (
     Zone,
     build_pivot_table,
     find_zones,
     zone_above,
     zone_below,
 )
-from src.engine.base_strategy import BaseStrategy, MarketData, Signal, SignalDirection
+from core.engine.base_strategy import BaseStrategy, MarketData, Signal, SignalDirection
 
 logger = logging.getLogger(__name__)
 

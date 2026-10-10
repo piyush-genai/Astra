@@ -8,8 +8,8 @@ Unit tests for PositionManager — tasks 4a and 4b of trading-engine-core spec.
 import pytest
 from datetime import datetime, timezone
 
-from src.engine.base_strategy import Signal, SignalDirection
-from src.engine.position_manager import ConcurrencyConfig, PositionManager
+from core.engine.base_strategy import Signal, SignalDirection
+from core.engine.position_manager import ConcurrencyConfig, PositionManager
 
 
 def _nifty_signal(strategy_id: str = "strat_a") -> Signal:

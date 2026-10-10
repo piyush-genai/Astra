@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from src.engine.base_strategy import Signal, SignalDirection
+from core.engine.base_strategy import Signal, SignalDirection
 
 logger = logging.getLogger(__name__)
 

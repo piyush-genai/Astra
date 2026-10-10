@@ -26,7 +26,7 @@ Pivot formula cross-check from real data (29 Jul 2026 → 30 Jul levels):
 import pytest
 import pandas as pd
 
-from src.data.indicators import (
+from core.data.indicators import (
     Zone,
     build_pivot_table,
     classic_pivot,
@@ -153,7 +153,7 @@ class TestBuildPivotTable:
 
 class TestFindZones:
     def _make_series(self, levels: dict) -> pd.Series:
-        from src.data.indicators import LEVEL_COLUMNS
+        from core.data.indicators import LEVEL_COLUMNS
         data = {col: float("nan") for col in LEVEL_COLUMNS}
         data.update(levels)
         return pd.Series(data)
@@ -196,7 +196,7 @@ class TestFindZones:
         assert len(zones) == 2
 
     def test_empty_series_returns_no_zones(self):
-        from src.data.indicators import LEVEL_COLUMNS
+        from core.data.indicators import LEVEL_COLUMNS
         s = pd.Series({col: float("nan") for col in LEVEL_COLUMNS})
         zones = find_zones(s, tolerance_pct=0.18)
         assert zones == []

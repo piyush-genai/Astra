@@ -8,7 +8,7 @@ Unit tests for RiskManager — tasks 5a, 5b, 5c of trading-engine-core spec.
 
 import pytest
 
-from src.engine.risk_manager import RiskConfig, RiskManager
+from core.engine.risk_manager import RiskConfig, RiskManager
 
 
 def _make_rm(

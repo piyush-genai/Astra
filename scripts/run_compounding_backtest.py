@@ -19,11 +19,11 @@ from dotenv import load_dotenv
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.backtest.harness import BacktestHarness
-from src.backtest.options_pricer import OptionsPricer
-from src.broker.upstox_adapter import UpstoxAdapter
-from src.config_loader import load_instruments, load_risk
-from src.strategies.pivot_cpr_strategy import PivotCprStrategy
+from backtest.harness import BacktestHarness
+from backtest.options_pricer import OptionsPricer
+from core.broker.upstox_adapter import UpstoxAdapter
+from core.config_loader import load_instruments, load_risk
+from strategies.pivot_cpr_strategy import PivotCprStrategy
 
 load_dotenv()
 logging.basicConfig(

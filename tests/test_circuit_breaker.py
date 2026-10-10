@@ -15,8 +15,8 @@ from unittest.mock import MagicMock
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.config_loader import load_instruments, load_risk
-from src.engine.base_strategy import Signal, SignalDirection
+from core.config_loader import load_instruments, load_risk
+from core.engine.base_strategy import Signal, SignalDirection
 
 
 def test_circuit_breaker():
