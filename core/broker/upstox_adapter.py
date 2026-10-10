@@ -68,6 +68,8 @@ class UpstoxAdapter(BrokerAdapter):
         self._sandbox: bool = config.get("sandbox", True)
         self._access_token: Optional[str] = config.get("access_token")
         self._exec_base_url = self.SANDBOX_BASE_URL if self._sandbox else self.LIVE_BASE_URL
+        # Optional instruments config (pass parsed instruments.yaml for dynamic strike/expiry resolution)
+        self._instruments_config: dict = config.get("instruments_config", {})
 
         if self._sandbox:
             logger.warning(
@@ -437,10 +439,104 @@ class UpstoxAdapter(BrokerAdapter):
         target_strike: Optional[float] = None,
     ) -> Optional[OptionContract]:
         """
-        Resolve best matching option contract.
-        Implementation deferred — not needed for backtest (Stage 1).
+        Resolve the nearest liquid option contract for an instrument.
+
+        Steps:
+          1. Fetch current underlying LTP.
+          2. Compute ATM strike (or use target_strike if provided).
+          3. Compute next weekly expiry date from instruments.yaml weekday config.
+          4. Call get_option_quote() to get the real Upstox instrument_key + LTP.
+          5. Return OptionContract.
+
+        Returns None if the underlying LTP is unavailable or the strike is
+        not found in the option chain.
         """
-        raise NotImplementedError("get_option_contract() not yet implemented.")
+        inst_cfg = self._instruments_config.get("instruments", {}).get(instrument, {})
+
+        # Fallback hardcoded maps if instruments_config was not injected.
+        _underlying_map = {
+            "NIFTY": "NSE_INDEX|Nifty 50",
+            "BANKNIFTY": "NSE_INDEX|Nifty Bank",
+        }
+        _strike_step_map = {"NIFTY": 50, "BANKNIFTY": 100}
+        _lot_size_map = {"NIFTY": 65, "BANKNIFTY": 30}
+
+        underlying_symbol = inst_cfg.get("underlying_symbol") or _underlying_map.get(instrument)
+        strike_step = inst_cfg.get("strike_step") or _strike_step_map.get(instrument, 50)
+        lot_size = inst_cfg.get("lot_size") or _lot_size_map.get(instrument, 65)
+
+        if not underlying_symbol:
+            logger.error("get_option_contract: unknown instrument '%s'", instrument)
+            return None
+
+        # Step 1 — get underlying price.
+        ltp = self.get_ltp(underlying_symbol)
+        if ltp is None or ltp <= 0:
+            logger.error("get_option_contract: cannot fetch LTP for %s", underlying_symbol)
+            return None
+
+        # Step 2 — compute strike.
+        if target_strike is not None:
+            strike = float(target_strike)
+        else:
+            # ATM: round to nearest strike_step
+            strike = round(ltp / strike_step) * strike_step
+
+        # Step 3 — compute next expiry.
+        expiry = self._next_expiry(instrument, inst_cfg)
+
+        # Step 4 — fetch real instrument_key from option chain.
+        quote = self.get_option_quote(instrument, strike, option_type, expiry)
+        if quote is None:
+            logger.error(
+                "get_option_contract: strike %.0f %s not found in chain for %s %s",
+                strike, option_type, instrument, expiry,
+            )
+            return None
+
+        return OptionContract(
+            symbol=quote["instrument_key"],
+            instrument=instrument,
+            strike=strike,
+            option_type=option_type,
+            expiry=expiry,
+            lot_size=lot_size,
+        )
+
+    def _next_expiry(self, instrument: str, inst_cfg: dict) -> str:
+        """
+        Return the next weekly expiry date as an ISO string (YYYY-MM-DD).
+
+        Uses weekly_expiry_weekday from inst_cfg if present, else falls back
+        to Tuesday for NIFTY (weekday=1) and Wednesday for BANKNIFTY (weekday=2).
+        If today IS the expiry weekday and market is still open (before 15:30 IST),
+        returns today; otherwise returns next week's expiry.
+        """
+        from datetime import date, timedelta, datetime as _dt
+        try:
+            import zoneinfo
+            ist = zoneinfo.ZoneInfo("Asia/Kolkata")
+            now_ist = _dt.now(tz=ist)
+        except Exception:
+            now_ist = _dt.now()
+
+        _weekday_defaults = {"NIFTY": 1, "BANKNIFTY": 2}
+        expiry_weekday = inst_cfg.get("weekly_expiry_weekday",
+                                      _weekday_defaults.get(instrument, 1))
+
+        today = now_ist.date()
+        days_ahead = expiry_weekday - today.weekday()
+
+        if days_ahead < 0:
+            days_ahead += 7
+        elif days_ahead == 0:
+            # Today is expiry day. Use today only if market is still open (before 15:30 IST).
+            market_closed = now_ist.hour > 15 or (now_ist.hour == 15 and now_ist.minute >= 30)
+            if market_closed:
+                days_ahead = 7  # roll to next week
+
+        expiry_date = today + timedelta(days=days_ahead)
+        return expiry_date.strftime("%Y-%m-%d")
 
     # ------------------------------------------------------------------
     # Order management (execution plane — sandbox or live)
@@ -451,20 +547,96 @@ class UpstoxAdapter(BrokerAdapter):
         POST /order/place
 
         Upstox requires algo_id on every order since 1 April 2026.
-        This is validated by ExecutionEngine before calling here, but
-        we double-check defensively.
+        ExecutionEngine validates this before calling here; we double-check.
+
+        Raises RuntimeError on API failure — callers must not swallow this,
+        so the engine can log the failed order and halt further action.
         """
         if not order.algo_id:
             raise ValueError(
                 "algo_id is required on every order (legal requirement since 1 April 2026)."
             )
-        # TODO: implement actual API call.
-        raise NotImplementedError("place_order() not yet implemented.")
+
+        url = f"{self._exec_base_url}/order/place"
+        payload = {
+            "quantity": order.quantity,
+            "product": order.product_type.value,   # "I" = intraday
+            "validity": "DAY",
+            "price": order.price if order.price is not None else 0,
+            "tag": f"ASTRA_{order.algo_id}",        # identifies algo to Upstox / SEBI
+            "instrument_token": order.symbol,
+            "order_type": order.order_type.value,   # "MARKET" or "LIMIT"
+            "transaction_type": order.side.value,   # "BUY" or "SELL"
+            "disclosed_quantity": 0,
+            "trigger_price": 0,
+            "is_amo": False,
+        }
+        headers = {**self._exec_headers(), "Content-Type": "application/json"}
+
+        resp = requests.post(url, json=payload, headers=headers, timeout=10)
+
+        if resp.status_code not in (200, 201):
+            raise RuntimeError(
+                f"place_order failed: HTTP {resp.status_code} — {resp.text}"
+            )
+
+        data = resp.json()
+        if data.get("status") != "success":
+            raise RuntimeError(f"place_order rejected by Upstox: {data}")
+
+        order_id: str = data["data"]["order_id"]
+        logger.info(
+            "Order placed — order_id=%s symbol=%s side=%s qty=%d %s",
+            order_id, order.symbol, order.side.value, order.quantity,
+            "(SANDBOX)" if self._sandbox else "(LIVE)",
+        )
+        return order_id
 
     def cancel_order(self, order_id: str) -> bool:
-        # TODO: DELETE /order/cancel?order_id=<order_id>
-        raise NotImplementedError("cancel_order() not yet implemented.")
+        """
+        DELETE /order/cancel?order_id=<order_id>
+
+        Returns True if the cancellation succeeded, False if the order was
+        already filled or not found. Raises RuntimeError on unexpected errors.
+        """
+        url = f"{self._exec_base_url}/order/cancel"
+        params = {"order_id": order_id}
+
+        resp = requests.delete(url, headers=self._exec_headers(),
+                               params=params, timeout=10)
+
+        if resp.status_code == 200:
+            logger.info("Order cancelled: order_id=%s", order_id)
+            return True
+
+        # 400 usually means order already filled/cancelled — log but don't raise.
+        if resp.status_code == 400:
+            logger.warning(
+                "cancel_order(%s): 400 — order may already be filled/cancelled: %s",
+                order_id, resp.text,
+            )
+            return False
+
+        raise RuntimeError(
+            f"cancel_order({order_id}) unexpected error: HTTP {resp.status_code} — {resp.text}"
+        )
 
     def get_positions(self) -> list:
-        # TODO: GET /portfolio/short-term-positions
-        raise NotImplementedError("get_positions() not yet implemented.")
+        """
+        GET /portfolio/short-term-positions
+
+        Returns raw Upstox position dicts.
+        Returns empty list on failure (logged as error — callers should check).
+        """
+        url = f"{self._exec_base_url}/portfolio/short-term-positions"
+
+        try:
+            resp = requests.get(url, headers=self._exec_headers(), timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            positions = data.get("data", [])
+            logger.debug("get_positions: %d open positions", len(positions))
+            return positions
+        except Exception as e:
+            logger.error("get_positions() failed: %s", e)
+            return []
