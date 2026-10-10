@@ -1,108 +1,67 @@
-#!/usr/bin/env python3
 """
-Test script to verify circuit breaker functionality.
+Circuit breaker integration test for PaperTradingEngine.
 
-This test creates a PaperTradingEngine with a small capital and simulates
-losing trades to verify the circuit breaker trips at the configured threshold.
+Verifies that the engine correctly delegates circuit-breaker state to
+RiskManager and blocks new entries after the daily loss limit is hit.
 """
+from __future__ import annotations
 
-import sys
-from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+from live.state_manager import StateManager
+from scripts.run_paper import PaperTradingEngine
 
-from core.config_loader import load_instruments, load_risk
-from core.engine.base_strategy import Signal, SignalDirection
+
+INSTRUMENTS_CFG = {
+    "instruments": {
+        "NIFTY": {"lot_size": 65, "weekly_expiry_weekday": 1, "strike_step": 50}
+    }
+}
+
+RISK_CFG = {
+    "capital": {"starting_capital": 10_000},
+    "per_trade": {
+        "max_loss_per_trade_pct": 10.0,
+        "max_capital_deployed_pct": 50.0,
+    },
+    "circuit_breaker": {"daily_loss_limit_pct": 7.5},
+    "position_limits": {"hard_cap_lots": 5},
+}
+
+
+def _make_engine():
+    sm = MagicMock(spec=StateManager)
+    sm.get_capital.return_value = 10_000.0
+    sm.get_daily_pnl.return_value = 0.0
+    pricer = MagicMock()
+    pricer.strike_step = 50
+    pricer.expiry_weekday = 1
+    pricer.lot_size = 65
+    return PaperTradingEngine(
+        strategy=MagicMock(), adapter=MagicMock(), pricer=pricer,
+        instruments_cfg=INSTRUMENTS_CFG, risk_cfg=RISK_CFG,
+        state_manager=sm,
+    )
 
 
 def test_circuit_breaker():
-    """Test that circuit breaker trips when daily loss exceeds limit."""
-    print("=" * 80)
-    print("CIRCUIT BREAKER TEST")
-    print("=" * 80)
-    
-    # Load real config
-    instruments_cfg = load_instruments()
-    risk_cfg = load_risk()
-    
-    # Create mock components
-    strategy = MagicMock()
-    adapter = MagicMock()
-    pricer = MagicMock()
-    pricer.lot_size = 65
-    
-    # Import here to avoid circular dependency issues
-    from scripts.run_paper import PaperTradingEngine
-    
-    # Create engine with test capital
-    # Temporarily override starting_capital for test
-    original_starting = risk_cfg.get("capital", {}).get("starting_capital", 20000)
-    test_starting_capital = 10000  # Smaller for easier testing
-    
-    # Set test capital in config
-    if "capital" not in risk_cfg:
-        risk_cfg["capital"] = {}
-    risk_cfg["capital"]["starting_capital"] = test_starting_capital
-    
-    engine = PaperTradingEngine(strategy, adapter, pricer, instruments_cfg, risk_cfg)
-    
-    # Manually set day_start_capital (simulating session start)
-    engine.day_start_capital = engine.capital
-    engine.circuit_breaker_tripped = False
-    
-    print(f"\n1. Initial Setup:")
-    print(f"   Capital: ₹{engine.capital:.2f}")
-    print(f"   Day-start capital: ₹{engine.day_start_capital:.2f}")
-    print(f"   Daily loss limit: {risk_cfg['circuit_breaker']['daily_loss_limit_pct']}%")
-    
-    loss_limit_rupees = engine.day_start_capital * (risk_cfg['circuit_breaker']['daily_loss_limit_pct'] / 100)
-    print(f"   Loss threshold: ₹{loss_limit_rupees:.2f}")
-    
-    # Simulate losing trades
-    print(f"\n2. Simulating Losing Trades:")
-    
-    # Loss 1: -₹400 (4% of ₹10,000)
-    engine.capital -= 400
-    print(f"   After Loss 1 (-₹400): Capital=₹{engine.capital:.2f}, Today P&L=₹{engine.capital - engine.day_start_capital:.2f}")
-    engine.check_circuit_breaker()
-    assert not engine.circuit_breaker_tripped, "Should not trip yet"
-    print(f"   ✓ Circuit breaker: NOT tripped")
-    
-    # Loss 2: -₹400 more (total -₹800 = 8% of ₹10,000, exceeds 7.5% threshold)
-    engine.capital -= 400
-    print(f"   After Loss 2 (-₹400): Capital=₹{engine.capital:.2f}, Today P&L=₹{engine.capital - engine.day_start_capital:.2f}")
-    engine.check_circuit_breaker()
-    
-    # Verify circuit breaker tripped
-    print(f"\n3. Verification:")
-    assert engine.circuit_breaker_tripped, "❌ Circuit breaker should have tripped!"
-    print(f"   ✅ Circuit breaker TRIPPED correctly!")
-    
-    total_loss = engine.day_start_capital - engine.capital
-    loss_pct = (total_loss / engine.day_start_capital) * 100
-    print(f"   Total loss: ₹{total_loss:.2f} ({loss_pct:.1f}%)")
-    print(f"   Threshold:  ₹{loss_limit_rupees:.2f} ({risk_cfg['circuit_breaker']['daily_loss_limit_pct']}%)")
-    
-    # Verify subsequent entries would be blocked
-    print(f"\n4. Entry Blocking Test:")
-    # In the real run() method, this check prevents new signal evaluation:
-    # if not self.active_position and not self.circuit_breaker_tripped:
-    can_enter = not engine.circuit_breaker_tripped
-    print(f"   Can enter new position: {can_enter}")
-    assert not can_enter, "❌ New entries should be blocked!"
-    print(f"   ✅ New entries correctly blocked!")
-    
-    # Restore original config
-    risk_cfg["capital"]["starting_capital"] = original_starting
-    
-    print("\n" + "=" * 80)
-    print("✅ ALL CIRCUIT BREAKER TESTS PASSED")
-    print("=" * 80)
+    """Circuit breaker should trip and block new entries after daily loss limit."""
+    engine = _make_engine()
+    rm = engine._rm
 
+    # Daily limit: 7.5% of 10k = ₹750.
+    limit = rm._config.daily_loss_limit
+    assert limit == 750.0
 
-if __name__ == "__main__":
-    test_circuit_breaker()
+    # Loss 1: ₹400 (well under the ₹750 threshold).
+    rm.record_realized_loss(-400.0)
+    assert not rm.circuit_breaker_tripped, "Should not trip at ₹400 loss"
+
+    # Loss 2: another ₹400, total ₹800 → exceeds ₹750 threshold.
+    rm.record_realized_loss(-400.0)
+    assert rm.circuit_breaker_tripped, "Circuit breaker should have tripped at ₹800 total loss"
+
+    # Verify pre-trade check is blocked.
+    allowed, reason = rm.check_pre_trade(max_loss_for_trade=100.0, current_unrealized_loss=0.0)
+    assert not allowed
+    assert "circuit breaker" in reason.lower()

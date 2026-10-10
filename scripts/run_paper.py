@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-Paper Trading Mode - Run strategy with simulated orders.
+Paper Trading Mode — runs the strategy against live data with simulated fills.
 
-Connects to live market data but does NOT place actual orders.
-Logs all trades to CSV for review and validation before going live.
+Architecture
+-----------
+  PaperTradingEngine
+  ├── RiskManager    — circuit breaker, per-trade limits, kill switch
+  ├── PositionManager — in-memory concurrency + capital-deployment tracking
+  ├── StateManager   — SQLite persistence (capital, trades, open positions)
+  └── UpstoxAdapter  — market data + option quotes (dry_run; no real orders)
 
 Usage:
     python scripts/run_paper.py --strategy pivot_cpr
@@ -12,25 +17,27 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 from dotenv import load_dotenv
 
-# Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from backtest.options_pricer import OptionsPricer
+from backtest.options_pricer import OptionsPricer, atm_strike, next_expiry
 from core.broker.upstox_adapter import UpstoxAdapter
 from core.config_loader import load_instruments, load_risk
 from core.engine.base_strategy import MarketData, Signal, SignalDirection
+from core.engine.position_manager import ConcurrencyConfig, Position, PositionManager
+from core.engine.risk_manager import RiskConfig, RiskManager
+from live.state_manager import StateManager
 from strategies.pivot_cpr_strategy import PivotCprStrategy
 
 load_dotenv()
@@ -40,524 +47,495 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Telegram bot for real-time trade alerts
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def send_telegram_alert(message: str):
-    """Send a message to Telegram (trade alerts)."""
+
+def send_telegram_alert(message: str) -> None:
+    """Send a message to Telegram. Silently skips if credentials not set."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return  # Silently skip if Telegram not configured
-    
+        return
     try:
         import requests
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML",
-        }
-        requests.post(url, json=payload, timeout=5)
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"},
+            timeout=5,
+        )
     except Exception as e:
-        logger.warning("Failed to send Telegram alert: %s", e)
-
+        logger.warning("Telegram alert failed: %s", e)
 
 
 class PaperTradingEngine:
-    """Simulated trading engine - logs trades but doesn't place orders."""
-    
-    def __init__(self, strategy, adapter, pricer, instruments_cfg, risk_cfg):
+    """
+    Simulated trading engine.
+
+    Delegates risk decisions to RiskManager, position lifecycle to
+    PositionManager, and durable state to StateManager (SQLite). No real
+    orders are ever placed — all order paths are paper-only.
+    """
+
+    def __init__(
+        self,
+        strategy,
+        adapter: UpstoxAdapter,
+        pricer: OptionsPricer,
+        instruments_cfg: dict,
+        risk_cfg: dict,
+        state_manager: StateManager,
+        strategy_id: str = "pivot_cpr",
+    ) -> None:
         self.strategy = strategy
         self.adapter = adapter
         self.pricer = pricer
         self.instruments_cfg = instruments_cfg
         self.risk_cfg = risk_cfg
-        
-        # Load persisted capital state
-        self.capital_state_file = Path(__file__).parent.parent / "capital_state.json"
-        self.capital = self._load_capital()
-        
-        # Paper trading state
-        self.active_position = None
-        self.entry_time = None
-        self.entry_price = None
-        self.entry_premium = None
-        self.lots = 0
-        self.current_stop = None
-        self.bars_in_trade = 0
-        
-        # Tracking
-        self.trades = []
-        self.signals_suppressed = []
-        
-        # Circuit breaker state (set at session start)
-        self.day_start_capital = None
-        self.circuit_breaker_tripped = False
-        
-        # Cooldown tracking
-        self.last_exit_zone = None
-        self.last_exit_time = None
-        self.cooldown_minutes = 15
-        
-        logger.info("Paper Trading Engine initialized with ₹%.2f capital", self.capital)
-    
-    def _load_capital(self):
-        """Load persisted capital from capital_state.json."""
-        if self.capital_state_file.exists():
-            try:
-                with open(self.capital_state_file, "r") as f:
-                    state = json.load(f)
-                capital = state["running_capital"]
-                last_session = state.get("last_session_date", "unknown")
-                logger.info("✓ Loaded capital state: ₹%.2f (last session: %s)", capital, last_session)
-                return capital
-            except Exception as e:
-                logger.error("Failed to load capital state: %s - starting fresh", e)
-        
-        # First run ever - use starting_capital from config
-        starting_capital = self.risk_cfg.get("capital", {}).get("starting_capital", 20000)
-        logger.info("✓ First run - initializing capital at ₹%.2f", starting_capital)
-        self._save_capital(starting_capital)
-        return starting_capital
-    
-    def _save_capital(self, capital=None):
-        """Save current capital state to capital_state.json."""
-        if capital is None:
-            capital = self.capital
-        
-        state = {
-            "running_capital": capital,
-            "last_updated": datetime.now().isoformat(),
-            "last_session_date": datetime.now().strftime("%Y-%m-%d"),
-        }
-        
-        try:
-            with open(self.capital_state_file, "w") as f:
-                json.dump(state, f, indent=2)
-            logger.debug("Capital state saved: ₹%.2f", capital)
-        except Exception as e:
-            logger.error("Failed to save capital state: %s", e)
-    
-    def calculate_position_size(self, signal, entry_premium):
-        """Calculate how many lots to trade based on capital and risk limits."""
+        self._sm = state_manager
+        self._strategy_id = strategy_id
+
+        # Load persisted capital; initialise on first run.
+        capital = self._sm.get_capital()
+        if capital == 0.0:
+            capital = risk_cfg.get("capital", {}).get("starting_capital", 20_000.0)
+            self._sm.update_capital(capital, "initial_deposit")
+            logger.info("First run — initialising capital at ₹%.2f", capital)
+        else:
+            logger.info("Loaded persisted capital: ₹%.2f", capital)
+
+        # Derive absolute INR limits from day-start capital + config percentages.
+        # Limits are locked to day-start capital (not compounded mid-session).
+        per_trade = risk_cfg["per_trade"]
+        cb = risk_cfg["circuit_breaker"]
+        self._rm = RiskManager(RiskConfig(
+            max_loss_per_trade=capital * (per_trade["max_loss_per_trade_pct"] / 100),
+            daily_loss_limit=capital * (cb["daily_loss_limit_pct"] / 100),
+        ))
+        self._pm = PositionManager(ConcurrencyConfig(
+            max_concurrent_positions_per_instrument=1,
+            max_total_capital_deployed_pct=per_trade["max_capital_deployed_pct"],
+            allocated_capital=capital,
+        ))
+
+        # Active position tracking. _active is the PositionManager Position;
+        # _entry_details holds quote + contract info needed at exit time.
+        self._active: Optional[Position] = None
+        self._entry_details: dict = {}
+        self._current_stop: Optional[float] = None
+        self._bars_in_trade: int = 0
+
+        # Cooldown: avoid re-entering the same zone within cooldown_minutes.
+        self._last_exit_zone: Optional[tuple] = None
+        self._last_exit_time: Optional[datetime] = None
+        self._cooldown_minutes: int = 15
+
+        self._day_start_capital: float = capital
+
+    # ------------------------------------------------------------------
+    # Capital access (always reads from StateManager, not a cached local)
+    # ------------------------------------------------------------------
+
+    @property
+    def capital(self) -> float:
+        return self._sm.get_capital()
+
+    # ------------------------------------------------------------------
+    # Kill switch + status file
+    # ------------------------------------------------------------------
+
+    def _sync_kill_switch(self) -> None:
+        """Activate RiskManager kill switch if the sentinel file is present."""
+        if (project_root / "KILL_SWITCH.txt").exists():
+            if not self._rm.kill_switch_active:
+                self._rm.activate_kill_switch()
+                logger.warning("🛑 KILL SWITCH FILE detected — halting new entries.")
+
+    def _update_status(self, message: str) -> None:
+        with open(project_root / "TRADING_STATUS.txt", "w") as f:
+            f.write(f"{datetime.now()}: {message}\n")
+
+    # ------------------------------------------------------------------
+    # Position sizing
+    # ------------------------------------------------------------------
+
+    def _calc_lots(self, entry_premium: float) -> int:
+        """Return how many lots to trade given current capital and risk config."""
+        capital = self.capital
         lot_size = self.instruments_cfg["instruments"]["NIFTY"]["lot_size"]
-        per_trade_cfg = self.risk_cfg["per_trade"]
-        
-        # Rule 1: Risk-based (max % risk from config)
-        max_risk = self.capital * (per_trade_cfg["max_loss_per_trade_pct"] / 100)
-        max_loss_per_lot = entry_premium * lot_size
-        lots_from_risk = int(max_risk / max_loss_per_lot) if max_loss_per_lot > 0 else 0
-        
-        # Rule 2: Capital-based (max % deployed from config)
-        max_deployed = self.capital * (per_trade_cfg["max_capital_deployed_pct"] / 100)
-        lots_from_capital = int(max_deployed / max_loss_per_lot) if max_loss_per_lot > 0 else 0
-        
-        # Rule 3: Hard cap (absolute limit from config)
+        per_trade = self.risk_cfg["per_trade"]
         hard_cap = self.risk_cfg["position_limits"]["hard_cap_lots"]
-        
-        # Take minimum, but at least 1 if we're trading
-        lots = max(1, min(lots_from_risk, lots_from_capital, hard_cap))
-        
-        logger.debug(
-            "Position sizing: capital=₹%.0f, premium=₹%.2f, risk_lots=%d, cap_lots=%d, hard_cap=%d → %d lots",
-            self.capital, entry_premium, lots_from_risk, lots_from_capital, hard_cap, lots
-        )
-        
+        cost_per_lot = entry_premium * lot_size
+
+        if cost_per_lot <= 0:
+            return 0
+
+        lots = max(1, min(
+            int(capital * (per_trade["max_loss_per_trade_pct"] / 100) / cost_per_lot),
+            int(capital * (per_trade["max_capital_deployed_pct"] / 100) / cost_per_lot),
+            hard_cap,
+        ))
+        logger.debug("Position sizing: ₹%.0f capital, ₹%.2f premium → %d lots", capital, entry_premium, lots)
         return lots
-    
-    def check_circuit_breaker(self):
-        """Halt new entries if today's realized loss breaches the daily limit."""
-        daily_limit_pct = self.risk_cfg["circuit_breaker"]["daily_loss_limit_pct"]
-        daily_limit_rupees = self.day_start_capital * (daily_limit_pct / 100)
-        today_pnl = self.capital - self.day_start_capital  # realized only
-        
-        if today_pnl <= -daily_limit_rupees and not self.circuit_breaker_tripped:
-            self.circuit_breaker_tripped = True
-            logger.warning(
-                "🛑 CIRCUIT BREAKER TRIPPED: today's loss ₹%.2f exceeds limit ₹%.2f (%.1f%% of day-start capital ₹%.2f)",
-                -today_pnl, daily_limit_rupees, daily_limit_pct, self.day_start_capital
-            )
-            self.update_status(f"CIRCUIT BREAKER TRIPPED — halted for the day. Loss: ₹{-today_pnl:.2f}")
-            send_telegram_alert(
-                f"🛑 <b>CIRCUIT BREAKER TRIPPED</b>\n"
-                f"Today's loss: ₹{-today_pnl:.2f}\n"
-                f"Limit: ₹{daily_limit_rupees:.2f} ({daily_limit_pct}%)\n"
-                f"No new positions will open for the rest of today."
-            )
-    
-    def check_cooldown(self, signal):
-        """Check if this zone is in cooldown period."""
-        setup = signal.metadata["setup"]
+
+    # ------------------------------------------------------------------
+    # Cooldown
+    # ------------------------------------------------------------------
+
+    def _in_cooldown(self, signal: Signal) -> bool:
+        setup = signal.metadata.get("setup")
+        if not setup:
+            return False
         zone = setup.zone
         zone_key = (round(zone.price_low, 2), round(zone.price_high, 2))
-        
-        if (self.last_exit_zone == zone_key and 
-            self.last_exit_time is not None and
-            (datetime.now() - self.last_exit_time) < timedelta(minutes=self.cooldown_minutes)):
-            return True
-        return False
-    
-    def enter_position(self, signal, bar_time, entry_price):
-        """Enter a paper position."""
+        return (
+            self._last_exit_zone == zone_key
+            and self._last_exit_time is not None
+            and (datetime.now() - self._last_exit_time) < timedelta(minutes=self._cooldown_minutes)
+        )
+
+    # ------------------------------------------------------------------
+    # Entry
+    # ------------------------------------------------------------------
+
+    def _enter(self, signal: Signal, bar_time: datetime, entry_price: float) -> None:
         setup = signal.metadata["setup"]
         direction = signal.direction
-        
-        # Determine option contract details
-        from backtest.options_pricer import atm_strike, next_expiry
+        lot_size = self.instruments_cfg["instruments"]["NIFTY"]["lot_size"]
+
         strike = atm_strike(entry_price, self.pricer.strike_step)
-        option_type_str = "CE" if direction == SignalDirection.LONG else "PE"
+        option_type = "CE" if direction == SignalDirection.LONG else "PE"
         expiry_date = next_expiry(bar_time.date(), self.pricer.expiry_weekday)
-        contract_symbol = f"NIFTY {expiry_date.strftime('%d%b%y').upper()} {strike:.0f} {option_type_str}"
-        
-        # Fetch REAL option quote (LTP + bid/ask) from Upstox
+        contract_symbol = f"NIFTY {expiry_date.strftime('%d%b%y').upper()} {strike:.0f} {option_type}"
+
         quote = self.adapter.get_option_quote(
-            instrument="NIFTY",
-            strike=strike,
-            option_type=option_type_str,
-            expiry_date=expiry_date.isoformat(),
+            instrument="NIFTY", strike=strike,
+            option_type=option_type, expiry_date=expiry_date.isoformat(),
         )
-        
+
         if quote and quote["ask"] > 0:
-            # Use ASK price for buying (realistic fill cost)
-            entry_premium = quote["ask"]
-            premium_source = "REAL ASK"
-            logger.info(
-                "Real option quote: LTP=₹%.2f Bid=₹%.2f Ask=₹%.2f (using Ask for entry)",
-                quote["ltp"], quote["bid"], quote["ask"]
-            )
+            entry_premium, premium_source = quote["ask"], "REAL ASK"
+            logger.info("Option quote: LTP=₹%.2f Bid=₹%.2f Ask=₹%.2f", quote["ltp"], quote["bid"], quote["ask"])
         elif quote and quote["ltp"] > 0:
-            # Fallback to LTP if bid/ask not available
-            entry_premium = quote["ltp"]
-            premium_source = "REAL LTP"
-            logger.warning("Bid/Ask not available, using LTP")
+            entry_premium, premium_source = quote["ltp"], "REAL LTP"
+            logger.warning("Bid/Ask unavailable — using LTP for entry")
         else:
-            # Final fallback to Black-Scholes if API completely fails
-            logger.warning("⚠️ Real option quote not available, using Black-Scholes estimate")
+            logger.warning("Live quote unavailable — using Black-Scholes fallback")
             direction_str = "LONG" if direction == SignalDirection.LONG else "SHORT"
-            dummy_leg = self.pricer.price_trade(
-                direction=direction_str,
-                entry_spot=entry_price,
-                entry_time=bar_time,
-                exit_spot=entry_price,
-                exit_time=bar_time,
+            leg = self.pricer.price_trade(
+                direction=direction_str, entry_spot=entry_price, entry_time=bar_time,
+                exit_spot=entry_price, exit_time=bar_time,
             )
-            entry_premium = dummy_leg.entry_premium
-            premium_source = "BLACK-SCHOLES"
-        
-        # Calculate position size
-        lots = self.calculate_position_size(signal, entry_premium)
-        
-        if lots == 0:
-            logger.warning("⚠️ Insufficient capital - skipping trade (premium=₹%.2f)", entry_premium)
+            entry_premium, premium_source = leg.entry_premium, "BLACK-SCHOLES"
+
+        # Gate 1: position concurrency check.
+        max_loss_for_1_lot = entry_premium * lot_size
+        allowed, reason = self._pm.can_open(signal, estimated_capital=max_loss_for_1_lot)
+        if not allowed:
+            logger.info("Entry blocked by PositionManager — %s", reason)
             return
-        
-        # Enter position
-        self.active_position = signal
-        self.entry_time = bar_time
-        self.entry_price = entry_price
-        self.entry_premium = entry_premium
-        self.entry_strike = strike
-        self.entry_option_type = option_type_str
-        self.entry_expiry = expiry_date
-        self.premium_source = premium_source
-        self.lots = lots
-        self.current_stop = setup.initial_stop
-        self.bars_in_trade = 0
-        
-        logger.info(
-            "📈 PAPER ENTRY: %s %d lots @ ₹%.2f | Premium=₹%.2f (%s) | Stop=₹%.2f | Capital=₹%.2f | Contract=%s",
-            direction, lots, entry_price, entry_premium, premium_source, self.current_stop, self.capital, contract_symbol
+
+        # Gate 2: risk limits (per-trade + circuit breaker + kill switch).
+        allowed, reason = self._rm.check_pre_trade(
+            max_loss_for_trade=max_loss_for_1_lot,
+            current_unrealized_loss=self._pm.total_unrealized_pnl,
         )
-        
-        # Send Telegram alert
-        alert_msg = (
-            f"📈 <b>ENTRY</b>\n"
-            f"Contract: <b>{contract_symbol}</b>\n"
-            f"Direction: {direction.name}\n"
-            f"Lots: {lots}\n"
-            f"Spot: ₹{entry_price:.2f}\n"
-            f"Premium: ₹{entry_premium:.2f} ({premium_source})\n"
-            f"Stop: ₹{self.current_stop:.2f}\n"
-            f"Capital: ₹{self.capital:.2f}\n"
+        if not allowed:
+            logger.info("Entry blocked by RiskManager — %s", reason)
+            return
+
+        lots = self._calc_lots(entry_premium)
+        if lots == 0:
+            logger.warning("Insufficient capital — skipping (premium=₹%.2f)", entry_premium)
+            return
+
+        # Register with PositionManager (in-memory) and StateManager (SQLite).
+        self._active = self._pm.open_position(
+            signal=signal,
+            entry_time=bar_time,
+            contract_symbol=contract_symbol,
+            lot_size=lot_size,
+            premium_paid=entry_premium,
+            num_lots=lots,
+        )
+        self._sm.open_position({
+            "id": self._active.position_id,
+            "symbol": contract_symbol,
+            "direction": direction.name,
+            "entry_price": entry_premium,
+            "lots": lots,
+            "stop_loss": setup.initial_stop,
+            "entry_time": bar_time.isoformat(),
+            "strategy_name": self._strategy_id,
+            "regime": "live",
+        })
+
+        # Keep quote/contract details for exit P&L calculation.
+        self._entry_details = {
+            "signal": signal,
+            "strike": strike,
+            "option_type": option_type,
+            "expiry": expiry_date,
+            "premium": entry_premium,
+            "source": premium_source,
+            "entry_spot": entry_price,
+            "entry_time": bar_time,
+        }
+        self._current_stop = setup.initial_stop
+        self._bars_in_trade = 0
+
+        logger.info(
+            "📈 PAPER ENTRY: %s %d lots @ spot ₹%.2f | premium=₹%.2f (%s) | stop=₹%.2f | contract=%s",
+            direction.name, lots, entry_price, entry_premium, premium_source,
+            self._current_stop, contract_symbol,
+        )
+        send_telegram_alert(
+            f"📈 <b>ENTRY</b>\nContract: <b>{contract_symbol}</b>\n"
+            f"Direction: {direction.name}\nLots: {lots}\n"
+            f"Spot: ₹{entry_price:.2f}\nPremium: ₹{entry_premium:.2f} ({premium_source})\n"
+            f"Stop: ₹{self._current_stop:.2f}\nCapital: ₹{self.capital:.2f}\n"
             f"Time: {bar_time.strftime('%H:%M')}"
         )
-        send_telegram_alert(alert_msg)
-    
-    def exit_position(self, bar_time, exit_price, exit_reason):
-        """Exit paper position and calculate P&L."""
-        if not self.active_position:
+
+    # ------------------------------------------------------------------
+    # Exit
+    # ------------------------------------------------------------------
+
+    def _exit(self, bar_time: datetime, exit_price: float, exit_reason: str) -> None:
+        if self._active is None:
             return
-        
-        direction = self.active_position.direction
-        setup = self.active_position.metadata["setup"]
-        zone = setup.zone
-        lot_size = self.pricer.lot_size
-        
-        # Fetch REAL exit quote (use BID for selling)
+
+        direction = self._active.direction
+        lot_size = self._active.lot_size
+        lots = self._active.num_lots
+        det = self._entry_details
+        position_id = self._active.position_id
+
         quote = self.adapter.get_option_quote(
-            instrument="NIFTY",
-            strike=self.entry_strike,
-            option_type=self.entry_option_type,
-            expiry_date=self.entry_expiry.isoformat(),
+            instrument="NIFTY", strike=det["strike"],
+            option_type=det["option_type"], expiry_date=det["expiry"].isoformat(),
         )
-        
+
         if quote and quote["bid"] > 0:
-            # Use BID price for selling (realistic fill)
-            exit_premium = quote["bid"]
-            exit_source = "REAL BID"
-            logger.info(
-                "Real exit quote: LTP=₹%.2f Bid=₹%.2f Ask=₹%.2f (using Bid for exit)",
-                quote["ltp"], quote["bid"], quote["ask"]
-            )
+            exit_premium, exit_source = quote["bid"], "REAL BID"
+            logger.info("Exit quote: LTP=₹%.2f Bid=₹%.2f Ask=₹%.2f", quote["ltp"], quote["bid"], quote["ask"])
         elif quote and quote["ltp"] > 0:
-            exit_premium = quote["ltp"]
-            exit_source = "REAL LTP"
-            logger.warning("Bid/Ask not available for exit, using LTP")
+            exit_premium, exit_source = quote["ltp"], "REAL LTP"
+            logger.warning("Bid/Ask unavailable — using LTP for exit")
         else:
-            # Fallback to Black-Scholes
-            logger.warning("⚠️ Real exit quote not available, using Black-Scholes estimate")
+            logger.warning("Live exit quote unavailable — using Black-Scholes fallback")
             direction_str = "LONG" if direction == SignalDirection.LONG else "SHORT"
             leg = self.pricer.price_trade(
                 direction=direction_str,
-                entry_spot=self.entry_price,
-                entry_time=self.entry_time,
-                exit_spot=exit_price,
-                exit_time=bar_time,
+                entry_spot=det["entry_spot"], entry_time=det["entry_time"],
+                exit_spot=exit_price, exit_time=bar_time,
             )
-            exit_premium = leg.exit_premium
-            exit_source = "BLACK-SCHOLES"
-        
-        # Calculate P&L (buying premium, so profit when premium decreases for SHORT)
-        if direction == SignalDirection.SHORT:
-            # SHORT = buy PUT, profit when PUT premium drops
-            premium_change = self.entry_premium - exit_premium
-        else:
-            # LONG = buy CALL, profit when CALL premium rises
-            premium_change = exit_premium - self.entry_premium
-        
-        gross_pnl = premium_change * lot_size * self.lots
-        
-        # Transaction costs
-        tx_cost = (40.0 + self.entry_premium * 0.0015 * lot_size + 5.0) * self.lots
+            exit_premium, exit_source = leg.exit_premium, "BLACK-SCHOLES"
+
+        premium_change = (
+            det["premium"] - exit_premium if direction == SignalDirection.SHORT
+            else exit_premium - det["premium"]
+        )
+        gross_pnl = premium_change * lot_size * lots
+        tx_cost = (40.0 + det["premium"] * 0.0015 * lot_size + 5.0) * lots
         net_pnl = gross_pnl - tx_cost
-        
-        # Update capital
-        self.capital += net_pnl
-        
-        # Save capital state immediately (protects against crashes)
-        self._save_capital()
-        
-        # Get contract details for logging
-        contract_symbol = f"NIFTY {self.entry_expiry.strftime('%d%b%y').upper()} {self.entry_strike:.0f} {self.entry_option_type}"
-        
-        # Record trade
-        hold_minutes = (bar_time - self.entry_time).total_seconds() / 60
-        trade = {
-            "exit_time": str(bar_time),
-            "signal_type": self.active_position.metadata.get("signal_type", "regular"),
+        hold_min = (bar_time - det["entry_time"]).total_seconds() / 60
+
+        contract_symbol = self._active.contract_symbol
+
+        # Delegate to core components.
+        self._pm.close_position(position_id, net_pnl)
+
+        # Detect if circuit breaker trips on this loss.
+        was_tripped = self._rm.circuit_breaker_tripped
+        self._rm.record_realized_loss(net_pnl)
+        if not was_tripped and self._rm.circuit_breaker_tripped:
+            msg = (
+                f"🛑 <b>CIRCUIT BREAKER TRIPPED</b>\n"
+                f"Cumulative session loss exceeded daily limit.\n"
+                f"No new positions for the rest of today."
+            )
+            self._update_status("CIRCUIT BREAKER TRIPPED — halted for the day.")
+            send_telegram_alert(msg)
+
+        # Persist to SQLite atomically.
+        new_capital = self.capital + net_pnl
+        self._sm.update_capital(new_capital, f"trade:{exit_reason}")
+        self._sm.close_position(position_id)
+        self._sm.record_trade({
+            "id": position_id,
+            "symbol": contract_symbol,
             "direction": direction.name,
-            "entry_price": self.entry_price,
-            "exit_price": exit_price,
-            "entry_premium": self.entry_premium,
-            "entry_source": getattr(self, 'premium_source', 'UNKNOWN'),
-            "exit_premium": exit_premium,
-            "exit_source": exit_source,
-            "lots": self.lots,
-            "gross_pnl": gross_pnl,
-            "tx_cost": tx_cost,
-            "net_pnl": net_pnl,
+            "signal_type": "paper",
+            "strategy_name": self._strategy_id,
+            "regime": "live",
+            "entry_time": det["entry_time"].isoformat(),
+            "exit_time": bar_time.isoformat(),
+            "entry_price": det["premium"],
+            "exit_price": exit_premium,
+            "lots": lots,
+            "lot_size": lot_size,
+            "pnl": net_pnl,
             "exit_reason": exit_reason,
-            "hold_minutes": hold_minutes,
-            "capital_after": self.capital,
-            "contract": contract_symbol,
-        }
-        self.trades.append(trade)
-        
+            "metadata": {
+                "entry_source": det["source"],
+                "exit_source": exit_source,
+                "gross_pnl": gross_pnl,
+                "tx_cost": tx_cost,
+                "hold_minutes": hold_min,
+            },
+        })
+
         logger.info(
-            "📉 PAPER EXIT: %s | %s | P&L=₹%.2f (%.1f%%) | Entry=%s Exit=%s | Reason=%s | Hold=%.1fmin | Capital=₹%.2f",
-            contract_symbol, direction, net_pnl, (net_pnl / (self.entry_premium * lot_size * self.lots)) * 100,
-            getattr(self, 'premium_source', '?'), exit_source, exit_reason, hold_minutes, self.capital
+            "📉 PAPER EXIT: %s | %s | P&L=₹%.2f | hold=%.1fmin | capital=₹%.2f | reason=%s",
+            contract_symbol, direction.name, net_pnl, hold_min, new_capital, exit_reason,
         )
-        
-        # Send Telegram alert
         pnl_emoji = "✅" if net_pnl > 0 else "❌"
-        pnl_pct = (net_pnl / (self.entry_premium * lot_size * self.lots)) * 100
-        alert_msg = (
-            f"{pnl_emoji} <b>EXIT</b>\n"
-            f"Contract: <b>{contract_symbol}</b>\n"
+        cost_basis = det["premium"] * lot_size * lots
+        send_telegram_alert(
+            f"{pnl_emoji} <b>EXIT</b>\nContract: <b>{contract_symbol}</b>\n"
             f"Direction: {direction.name}\n"
-            f"P&L: ₹{net_pnl:.2f} ({pnl_pct:+.1f}%)\n"
-            f"Entry: ₹{self.entry_premium:.2f} ({getattr(self, 'premium_source', '?')})\n"
+            f"P&L: ₹{net_pnl:.2f} ({(net_pnl / cost_basis * 100):+.1f}%)\n"
+            f"Entry: ₹{det['premium']:.2f} ({det['source']})\n"
             f"Exit: ₹{exit_premium:.2f} ({exit_source})\n"
-            f"Reason: {exit_reason}\n"
-            f"Hold: {hold_minutes:.1f} min\n"
-            f"Capital: ₹{self.capital:.2f}\n"
-            f"Time: {bar_time.strftime('%H:%M')}"
+            f"Reason: {exit_reason}\nHold: {hold_min:.1f} min\n"
+            f"Capital: ₹{new_capital:.2f}\nTime: {bar_time.strftime('%H:%M')}"
         )
-        send_telegram_alert(alert_msg)
-        
-        # Set cooldown
-        self.last_exit_zone = (round(zone.price_low, 2), round(zone.price_high, 2))
-        self.last_exit_time = datetime.now()
-        
-        # Check circuit breaker after exit
-        self.check_circuit_breaker()
-        
-        # Clear position
-        self.active_position = None
-        self.entry_time = None
-        self.entry_price = None
-        self.entry_premium = None
-        self.entry_strike = None
-        self.entry_option_type = None
-        self.entry_expiry = None
-        self.premium_source = None
-        self.lots = 0
-        self.current_stop = None
-        self.bars_in_trade = 0
-    
-    def manage_position(self, bar, history):
-        """Check stops and manage active position."""
-        if not self.active_position:
+
+        # Record cooldown so we skip the same zone for cooldown_minutes.
+        signal = det.get("signal")
+        if signal:
+            setup = signal.metadata.get("setup")
+            if setup:
+                zone = setup.zone
+                self._last_exit_zone = (round(zone.price_low, 2), round(zone.price_high, 2))
+                self._last_exit_time = datetime.now()
+
+        # Clear active position state.
+        self._active = None
+        self._entry_details = {}
+        self._current_stop = None
+        self._bars_in_trade = 0
+
+    # ------------------------------------------------------------------
+    # Trailing stop management
+    # ------------------------------------------------------------------
+
+    def _manage(self, bar: pd.Series, history: pd.DataFrame) -> None:
+        """Check and update trailing stops; trigger exits when hit."""
+        if self._active is None:
             return
-        
-        direction = self.active_position.direction
-        setup = self.active_position.metadata["setup"]
+
+        direction = self._active.direction
+        setup = self._entry_details["signal"].metadata["setup"]
         zone = setup.zone
-        self.bars_in_trade += 1
-        
-        # Trailing stop (after 2 bars)
-        if self.bars_in_trade >= 2 and len(history) >= 2:
-            bar_2back = history.iloc[-3]  # Current is -1, so 2 back is -3
+        self._bars_in_trade += 1
+
+        # Trailing stop: after 2 bars, trail to the 2-bar-back candle's low/high.
+        if self._bars_in_trade >= 2 and len(history) >= 2:
+            bar_2back = history.iloc[-3]
             if direction == SignalDirection.LONG:
                 new_stop = bar_2back["low"]
-                if new_stop > self.current_stop:
-                    self.current_stop = new_stop
+                if new_stop > self._current_stop:
+                    self._current_stop = new_stop
             else:
                 new_stop = bar_2back["high"]
-                if new_stop < self.current_stop:
-                    self.current_stop = new_stop
-        
-        # Check stop hit
+                if new_stop < self._current_stop:
+                    self._current_stop = new_stop
+
+        # Update mark-to-market unrealized P&L for RiskManager proactive check.
+        # (Premium-based approximation; real MTM would need a live option quote.)
+        self._rm.update_unrealized_check(self._pm.total_unrealized_pnl)
+
         stop_hit = (
-            bar["low"] <= self.current_stop if direction == SignalDirection.LONG
-            else bar["high"] >= self.current_stop
+            bar["low"] <= self._current_stop if direction == SignalDirection.LONG
+            else bar["high"] >= self._current_stop
         )
-        
-        # Check structural invalidation
         structural_exit = (
             bar["close"] < zone.price_low if direction == SignalDirection.LONG
             else bar["close"] > zone.price_high
         )
-        
-        # Check EOD
         is_eod = bar.name.time() >= pd.Timestamp("15:25").time()
-        
+
         if stop_hit:
-            self.exit_position(bar.name, self.current_stop, "stop")
+            self._exit(bar.name, self._current_stop, "stop")
         elif structural_exit:
-            self.exit_position(bar.name, bar["close"], "structural")
+            self._exit(bar.name, bar["close"], "structural")
         elif is_eod:
-            self.exit_position(bar.name, bar["close"], "eod")
-    
-    def check_kill_switch(self):
-        """Check if kill switch has been activated."""
-        kill_switch_file = Path(__file__).parent.parent / "KILL_SWITCH.txt"
-        return kill_switch_file.exists()
-    
-    def update_status(self, message):
-        """Update status file for Telegram bot."""
-        status_file = Path(__file__).parent.parent / "TRADING_STATUS.txt"
-        with open(status_file, "w") as f:
-            f.write(f"{datetime.now()}: {message}\n")
-    
-    def run(self, duration_minutes=390):
+            self._exit(bar.name, bar["close"], "eod")
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+
+    def run(self, duration_minutes: int = 390) -> None:
         """Run paper trading for specified duration (default = full trading day)."""
         logger.info("🚀 Starting paper trading session...")
-        self.update_status("Paper trading started")
-        
-        # Snapshot day-start capital for circuit breaker calculations
-        self.day_start_capital = self.capital
-        self.circuit_breaker_tripped = False
-        logger.info("📊 Day-start capital: ₹%.2f (circuit breaker @ %.1f%% = ₹%.2f)",
-                   self.day_start_capital,
-                   self.risk_cfg["circuit_breaker"]["daily_loss_limit_pct"],
-                   self.day_start_capital * (self.risk_cfg["circuit_breaker"]["daily_loss_limit_pct"] / 100))
-        
+        self._rm.reset_session()
+        self._day_start_capital = self.capital
+        self._update_status("Paper trading started")
+
+        daily_loss_limit = self._rm._config.daily_loss_limit
+        logger.info(
+            "📊 Day-start capital: ₹%.2f | circuit breaker limit: ₹%.2f",
+            self._day_start_capital, daily_loss_limit,
+        )
+
         start_time = datetime.now()
         end_time = start_time + timedelta(minutes=duration_minutes)
-        
-        # Pre-fetch historical DAILY data for pivot calculation
-        logger.info("📊 Fetching historical daily data for pivot calculation...")
-        lookback_days = 90  # 90 days ensures we have weekly/monthly pivots
-        from_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+
+        # Pre-fetch daily data for pivot calculation.
+        logger.info("Fetching historical daily data for pivot calculation...")
+        from_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
         today = datetime.now().strftime("%Y-%m-%d")
-        
         daily_ohlcv = self.adapter.get_ohlcv(
-            symbol="NSE_INDEX|Nifty 50",
-            interval="day",
-            from_date=from_date,
-            to_date=today,
+            symbol="NSE_INDEX|Nifty 50", interval="day",
+            from_date=from_date, to_date=today,
         )
-        
         if daily_ohlcv is None or daily_ohlcv.empty:
-            logger.error("Failed to fetch historical daily data - cannot calculate pivots!")
+            logger.error("Failed to fetch historical daily data — cannot calculate pivots!")
             return
-        
-        logger.info("✓ Fetched %d days of historical data for pivot calculation", len(daily_ohlcv))
-        
-        # Initialize history buffer - only need 2 bars minimum now!
-        history_window = 2  # Minimum for strategy to work
+        logger.info("✓ Fetched %d days of historical data", len(daily_ohlcv))
+
+        history_window = 2
         history = pd.DataFrame()
-        historical_data_for_pivots = daily_ohlcv  # Store for pivot calculation
-        
+        historical_data_for_pivots = daily_ohlcv
+
         try:
             while datetime.now() < end_time:
-                # Check kill switch
-                if self.check_kill_switch():
-                    logger.warning("🛑 KILL SWITCH ACTIVATED - Stopping trading!")
-                    self.update_status("STOPPED by kill switch")
+                self._sync_kill_switch()
+                if self._rm.kill_switch_active:
+                    logger.warning("🛑 Kill switch active — stopping paper trading.")
+                    self._update_status("STOPPED by kill switch")
                     break
-                # Fetch latest 1-min bar
+
                 today = datetime.now().strftime("%Y-%m-%d")
                 ohlcv_1min = self.adapter.get_ohlcv(
-                    symbol="NSE_INDEX|Nifty 50",
-                    interval="1minute",
-                    from_date=today,
-                    to_date=today,
+                    symbol="NSE_INDEX|Nifty 50", interval="1minute",
+                    from_date=today, to_date=today,
                 )
-                
                 if ohlcv_1min is None or ohlcv_1min.empty:
-                    time.sleep(60)  # Wait 1 minute before retry
-                    continue
-                
-                # Resample to 5-min
-                ohlcv_5min = ohlcv_1min.resample("5min").agg({
-                    "open": "first",
-                    "high": "max",
-                    "low": "min",
-                    "close": "last",
-                    "volume": "sum",
-                }).dropna(subset=["open"])
-                
-                if len(ohlcv_5min) < history_window:
-                    logger.debug("Insufficient history (%d bars), waiting...", len(ohlcv_5min))
                     time.sleep(60)
                     continue
-                
-                # Get latest bar
+
+                ohlcv_5min = ohlcv_1min.resample("5min").agg({
+                    "open": "first", "high": "max",
+                    "low": "min", "close": "last", "volume": "sum",
+                }).dropna(subset=["open"])
+
+                if len(ohlcv_5min) < history_window:
+                    logger.debug("Insufficient bars (%d), waiting...", len(ohlcv_5min))
+                    time.sleep(60)
+                    continue
+
                 current_bar = ohlcv_5min.iloc[-1]
                 bar_time = current_bar.name
-                
-                # Skip if we've already processed this bar
+
                 if not history.empty and bar_time <= history.index[-1]:
-                    time.sleep(30)  # Wait 30 seconds
+                    time.sleep(30)
                     continue
-                
-                # Update history
+
                 history = ohlcv_5min.iloc[-history_window:]
-                
-                # Update today's running daily bar for pivot calculation
+
+                # Build today's running daily bar and append to historical daily data.
                 today_date = bar_time.normalize()
                 today_bars = ohlcv_5min[ohlcv_5min.index.normalize() == today_date]
                 today_daily = pd.DataFrame([{
@@ -566,22 +544,21 @@ class PaperTradingEngine:
                     "low": today_bars["low"].min(),
                     "close": current_bar["close"],
                 }], index=[today_date])
-                
-                # Combine: historical daily + today's running bar
                 pivot_data = pd.concat([historical_data_for_pivots, today_daily])
-                pivot_data = pivot_data[~pivot_data.index.duplicated(keep='last')]
-                
-                # Inject daily data into strategy for pivot calculation
+                pivot_data = pivot_data[~pivot_data.index.duplicated(keep="last")]
+
+                # Inject daily data into strategy for pivot calculation.
+                # TODO(arch): replace with a public set_daily_ohlc() method on the strategy.
                 self.strategy._daily_ohlc = pivot_data
-                
-                logger.info("Processing bar: %s | Close=%.2f", bar_time, current_bar["close"])
-                self.update_status(f"Processing bar {bar_time} | Close={current_bar['close']:.2f} | Capital=₹{self.capital:.2f}")
-                
-                # Manage existing position (uses 5-min history for trailing stops)
-                self.manage_position(current_bar, history)
-                
-                # Evaluate for new signal (if no active position)
-                if not self.active_position and not self.circuit_breaker_tripped:
+
+                logger.info("Bar: %s | close=%.2f | capital=₹%.2f", bar_time, current_bar["close"], self.capital)
+                self._update_status(
+                    f"Bar {bar_time} | Close={current_bar['close']:.2f} | Capital=₹{self.capital:.2f}"
+                )
+
+                self._manage(current_bar, history)
+
+                if self._active is None and not self._rm.circuit_breaker_tripped:
                     market_data = MarketData(
                         instrument="NIFTY",
                         bar_time=bar_time,
@@ -590,102 +567,66 @@ class PaperTradingEngine:
                         low=float(current_bar["low"]),
                         close=float(current_bar["close"]),
                         volume=float(current_bar.get("volume", 0)),
-                        history=history,  # 5-min bars for signals and momentum
+                        history=history,
                     )
-                    
                     try:
                         signal = self.strategy.evaluate(market_data)
-                        
                         if signal:
-                            # Check cooldown
-                            if self.check_cooldown(signal):
-                                logger.debug("Signal suppressed - zone in cooldown")
-                                self.signals_suppressed.append({
-                                    "time": str(bar_time),
-                                    "direction": signal.direction.name,
-                                    "reason": "cooldown",
-                                })
+                            if self._in_cooldown(signal):
+                                logger.debug("Signal suppressed — zone in cooldown")
                             else:
-                                # Enter on next bar's open (simulated)
-                                entry_price = float(current_bar["close"])  # Approximate
-                                self.enter_position(signal, bar_time, entry_price)
-                    
-                    except Exception as e:
-                        logger.exception("Strategy evaluation failed: %s", e)
-                
-                # Wait before next check
-                time.sleep(30)  # Check every 30 seconds
-        
+                                self._enter(signal, bar_time, float(current_bar["close"]))
+                    except Exception:
+                        logger.exception("Strategy evaluation error")
+
+                time.sleep(30)
+
         except KeyboardInterrupt:
             logger.info("Paper trading stopped by user")
-        
+
         finally:
-            # Close any open position
-            if self.active_position:
+            if self._active is not None:
                 last_bar = history.iloc[-1]
-                self.exit_position(last_bar.name, last_bar["close"], "eod")
-            
-            # Ensure final capital state is saved
-            self._save_capital()
-            
-            # Save results
-            self.save_results()
-    
-    def save_results(self):
-        """Save paper trading results to CSV."""
-        if not self.trades:
-            logger.warning("No trades executed during paper trading session")
-            return
-        
-        # Save trades
-        df = pd.DataFrame(self.trades)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = f"paper_trades_{timestamp}.csv"
-        df.to_csv(output_path, index=False)
-        
-        # Summary
-        winners = df[df["net_pnl"] > 0]
-        losers = df[df["net_pnl"] <= 0]
-        
+                self._exit(last_bar.name, last_bar["close"], "eod")
+            self._print_summary()
+
+    # ------------------------------------------------------------------
+    # Session summary
+    # ------------------------------------------------------------------
+
+    def _print_summary(self) -> None:
+        """Print session summary from StateManager data."""
+        end_capital = self.capital
+        net_pnl = end_capital - self._day_start_capital
+        daily_pnl = self._sm.get_daily_pnl()
+
         logger.info("")
-        logger.info("=" * 80)
+        logger.info("=" * 70)
         logger.info("PAPER TRADING SESSION SUMMARY")
-        logger.info("=" * 80)
-        logger.info("Starting Capital: ₹%.2f", self.day_start_capital)
-        logger.info("Ending Capital:   ₹%.2f", self.capital)
-        logger.info("Net P&L:          ₹%.2f (%.2f%%)", 
-                   self.capital - self.day_start_capital, 
-                   ((self.capital - self.day_start_capital) / self.day_start_capital) * 100)
-        logger.info("")
-        logger.info("Total Trades:     %d", len(df))
-        logger.info("Winners:          %d (%.1f%%)", len(winners), 
-                   100 * len(winners) / len(df) if len(df) > 0 else 0)
-        logger.info("Losers:           %d (%.1f%%)", len(losers),
-                   100 * len(losers) / len(df) if len(df) > 0 else 0)
-        logger.info("")
-        logger.info("Avg Winner:       ₹%.2f", winners["net_pnl"].mean() if len(winners) > 0 else 0)
-        logger.info("Avg Loser:        ₹%.2f", losers["net_pnl"].mean() if len(losers) > 0 else 0)
-        logger.info("")
-        logger.info("Signals Suppressed: %d", len(self.signals_suppressed))
-        logger.info("")
-        logger.info("Results saved to: %s", output_path)
-        logger.info("=" * 80)
+        logger.info("=" * 70)
+        logger.info("Starting Capital: ₹%.2f", self._day_start_capital)
+        logger.info("Ending Capital:   ₹%.2f", end_capital)
+        logger.info(
+            "Net P&L:          ₹%.2f (%.2f%%)",
+            net_pnl,
+            (net_pnl / self._day_start_capital * 100) if self._day_start_capital else 0,
+        )
+        logger.info("Today's P&L:      ₹%.2f", daily_pnl)
+        logger.info("=" * 70)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Paper trading mode")
     parser.add_argument("--strategy", default="pivot_cpr", help="Strategy to run")
-    parser.add_argument("--duration", type=int, default=390, help="Duration in minutes (default: 390 = full day)")
-    parser.add_argument("--iv", type=float, default=14.0, help="Implied volatility %")
+    parser.add_argument("--duration", type=int, default=390, help="Duration in minutes")
+    parser.add_argument("--iv", type=float, default=14.0, help="Implied volatility %%")
+    parser.add_argument("--db", default="paper_state.db", help="SQLite state file path")
     args = parser.parse_args()
-    
-    # Load config
+
     instruments_cfg = load_instruments()
     risk_cfg = load_risk()
-    
     nifty_cfg = instruments_cfg["instruments"]["NIFTY"]
-    
-    # Create components
+
     strategy = PivotCprStrategy(config={
         "tolerance_pct": 0.18,
         "min_levels_for_confluence": 2,
@@ -694,14 +635,14 @@ def main():
         "momentum_accel_multiplier": 1.8,
         "momentum_min_criteria": 2,
     })
-    
+
     pricer = OptionsPricer(
         lot_size=nifty_cfg["lot_size"],
         expiry_weekday=nifty_cfg["weekly_expiry_weekday"],
         strike_step=nifty_cfg["strike_step"],
         iv=args.iv / 100.0,
     )
-    
+
     adapter = UpstoxAdapter(config={
         "api_key": os.environ.get("UPSTOX_SANDBOX_API_KEY", ""),
         "api_secret": os.environ.get("UPSTOX_SANDBOX_API_SECRET", ""),
@@ -709,9 +650,18 @@ def main():
         "analytics_token": os.environ["UPSTOX_ANALYTICS_TOKEN"],
         "sandbox": True,
     })
-    
-    # Run paper trading
-    engine = PaperTradingEngine(strategy, adapter, pricer, instruments_cfg, risk_cfg)
+
+    state_manager = StateManager(args.db)
+
+    engine = PaperTradingEngine(
+        strategy=strategy,
+        adapter=adapter,
+        pricer=pricer,
+        instruments_cfg=instruments_cfg,
+        risk_cfg=risk_cfg,
+        state_manager=state_manager,
+        strategy_id=args.strategy,
+    )
     engine.run(duration_minutes=args.duration)
 
 
