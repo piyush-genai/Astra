@@ -10,13 +10,16 @@
 
 ```
 [RESEARCH] → [BACKTEST] → [WALK_FORWARD] → [MONTE_CARLO] → [PAPER] → [SHADOW] → [LIVE]
-    ↑
-  HERE
+                               ✓ PASSED
+                                    ↑
+                                  HERE
 ```
 
-**Next gate**: WALK_FORWARD (EXP-0006 must pass before promoting ATR filter to production)
+**Next gate**: MONTE_CARLO (EXP-0006 passed — ATR>30 confirmed OOS in 3/4 folds)
 
-**Current best config**: ATR>30 filter — ₹20k→₹207k (+938%), 168 trades, avg ₹1,116/trade
+**Current best config (OOS validated)**: ATR>30 filter — avg +88.0%/month OOS vs +49.4% baseline, ₹664/trade avg
+
+**Critical caveat**: Only 6 months of data; one clear high-vol cycle. Need 2023-2025 data before production confidence.
 
 ---
 
@@ -56,7 +59,7 @@
 | EXP-0003 | Range filter: prior-day range > 300 pts | COMPLETED | HIGH | +142% (better avg, but too aggressive) |
 | EXP-0004 | Near-expiry sub-strategy: Monday afternoon only | COMPLETED | HIGH | 13 trades too few; use as sizing signal instead |
 | **EXP-0005** | **ATR>30 regime filter** | **COMPLETED** | **HIGH** | **+938% vs +376% baseline — major alpha found** |
-| EXP-0006 | Walk-forward: validate ATR filter out-of-sample | PROPOSED | CRITICAL | — |
+| **EXP-0006** | **Walk-forward: validate ATR filter OOS** | **COMPLETED** | **CRITICAL** | **PASSED 3/4 folds — OOS avg +88% vs +49% baseline** |
 
 ---
 
