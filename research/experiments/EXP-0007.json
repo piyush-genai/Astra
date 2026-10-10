@@ -1,0 +1,67 @@
+{
+  "exp_id": "EXP-0007",
+  "hypothesis": "Adding near-expiry AFTERNOON position sizing (2-3x lots when DTE=1 and session=AFTERNOON) on top of the ATR>30 filter improves risk-adjusted returns, because those trades have dramatically higher EV (avg ₹2,803 from EXP-0002).",
+  "status": "COMPLETED",
+  "created_at": "2026-10-10T22:10:00.000000",
+  "updated_at": "2026-10-10T22:30:00.000000",
+  "strategy": "pivot_cpr_strategy",
+  "dataset_version": "nifty-5min-2026-feb-jul",
+  "config": {
+    "base_filter": "atr10 > 30",
+    "boost_condition": "DTE==1 AND session==AFTERNOON",
+    "boost_factors_tested": [1.0, 1.5, 2.0, 3.0, 4.0]
+  },
+  "metrics": {
+    "atr30_baseline_trades": 206,
+    "near_expiry_pm_trades": 12,
+    "near_expiry_pm_pct": 5.8,
+    "near_expiry_pm_avg_pnl": 876,
+    "near_expiry_pm_avg_premium": 19.8,
+    "other_trades_avg_pnl": 497,
+    "all_trades_avg_pnl": 519,
+    "sizing_results": {
+      "1.0x": {"final_capital": 126933, "return_pct": 534.7},
+      "1.5x": {"final_capital": 132188, "return_pct": 560.9},
+      "2.0x": {"final_capital": 137443, "return_pct": 587.2},
+      "3.0x": {"final_capital": 147954, "return_pct": 639.8},
+      "4.0x": {"final_capital": 158465, "return_pct": 692.3}
+    },
+    "monthly_2x_boost_lift": {
+      "2026-02": -737,
+      "2026-03": 12048,
+      "2026-04": -539,
+      "2026-05": -261,
+      "2026-06": 0,
+      "2026-07": 0
+    }
+  },
+  "findings": {
+    "FINDING-1": {
+      "title": "ATR>30 filter absorbs the near-expiry PM edge",
+      "detail": "EXP-0002 found avg ₹2,803/trade for near-expiry AFTERNOON trades (unfiltered). After applying ATR>30 filter, these same trades average only ₹876/trade. The ATR filter already captures the regime that made those trades valuable; the near-expiry AFTERNOON sub-selection within the filter doesn't add reliable extra edge.",
+      "implication": "The near-expiry PM signal and the ATR regime signal are NOT independent. They were measuring the same thing (March high-volatility regime)."
+    },
+    "FINDING-2": {
+      "title": "Near-expiry boost is inconsistent across months — March-dominated",
+      "detail": "2x boost: helpful in March (+12,048), harmful in Feb (-737), Apr (-539), May (-261). Only 1 of 4 months where qualifying trades existed showed benefit. With n=12 near-expiry PM trades across 6 months, the sample is insufficient for reliable sizing decisions.",
+      "implication": "Cannot trust this signal for position sizing with current data volume."
+    },
+    "FINDING-3": {
+      "title": "DTE=1 ALL DAY is more interesting than DTE=1 AFTERNOON specifically",
+      "detail": "Within ATR>30 universe: DTE=1 all sessions = 48 trades, avg ₹1,076 (40% WR). DTE=1 AFTERNOON only = 12 trades, avg ₹876. Non-AFTERNOON DTE=1 trades avg ~₹1,143. The AFTERNOON restriction (from EXP-0002 unfiltered analysis) does NOT hold within the ATR>30 filtered universe. DTE=1 itself is the better segmentation signal.",
+      "implication": "Use DTE as a sizing signal without session restriction. Test DTE=1 (all day) position sizing as EXP-0009."
+    },
+    "FINDING-4": {
+      "title": "DTE distribution within ATR>30 filter reveals structural edge",
+      "detail": "DTE=0: 37 trades, avg ₹487 (35% WR). DTE=1: 48 trades, avg ₹1,076 (40% WR). DTE=4: 28 trades, avg ₹301 (32% WR). DTE=5: 47 trades, avg ₹161 (26% WR). DTE=6: 46 trades, avg ₹463 (43% WR). DTE=1 is the strongest DTE bucket, followed by DTE=6 (next week's expiry alignment). DTE=5 is the weakest — mid-week, mid-cycle.",
+      "implication": "DTE=1 AND DTE=6 may both be worth sizing up. DTE=5 may be worth filtering out."
+    }
+  },
+  "leakage_checked": true,
+  "conclusion": "HYPOTHESIS REJECTED. Near-expiry AFTERNOON position sizing (2-3x) on top of ATR>30 does not add reliable value. The ATR filter already captures the regime that made near-expiry PM trades valuable; these two signals are not independent. The 2x boost improves returns by +52pp overall, but that improvement is dominated by 7 March trades and net-hurts performance in 3 of 5 qualifying months. With only 12 qualifying trades, conclusions are unreliable. DO NOT implement variable position sizing based on this finding.",
+  "next_experiments": [
+    "EXP-0008: ATR threshold stability across DTE buckets — test DTE=1 (all day) as independent sizing signal within ATR>30 universe",
+    "EXP-0009: Filter out DTE=5 trades (mid-week, mid-cycle — weakest bucket at avg ₹161/trade, 26% WR)",
+    "DATA-001: Acquire 2023-2025 historical data — all current findings rest on 6 months, one regime cycle"
+  ]
+}

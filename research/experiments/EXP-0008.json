@@ -1,0 +1,56 @@
+{
+  "exp_id": "EXP-0008",
+  "hypothesis": "Within the ATR>30 universe, DTE-based rules (drop DTE=5 weakest bucket; size up DTE=1 strongest bucket) improve risk-adjusted returns.",
+  "status": "COMPLETED",
+  "created_at": "2026-10-10T22:30:00.000000",
+  "updated_at": "2026-10-10T22:50:00.000000",
+  "strategy": "pivot_cpr_strategy",
+  "dataset_version": "nifty-5min-2026-feb-jul",
+  "metrics": {
+    "configs": {
+      "A_baseline_atr30": {"final_capital": 126933, "return_pct": 534.7, "trades": 206, "wr": 35.4, "avg_pnl": 519},
+      "B_drop_dte5":      {"final_capital": 119388, "return_pct": 496.9, "trades": 159, "wr": 38.4, "avg_pnl": 625},
+      "C_dte1_2x":        {"final_capital": 178575, "return_pct": 792.9, "trades": 206, "wr": 35.4, "avg_pnl": 770},
+      "D_drop5_dte1_2x":  {"final_capital": 171030, "return_pct": 755.1, "trades": 159, "wr": 38.4, "avg_pnl": 950},
+      "E_drop5_1x2_6x15": {"final_capital": 192324, "return_pct": 861.6, "trades": 159, "wr": 38.4, "avg_pnl": 1084}
+    },
+    "dte1_monthly_consistency": {
+      "2026-02": {"trades": 7,  "avg_pnl": 2982,  "beats_others": true,  "boost_adds": 20876},
+      "2026-03": {"trades": 19, "avg_pnl": 1406,  "beats_others": true,  "boost_adds": 26719},
+      "2026-04": {"trades": 10, "avg_pnl": -338,  "beats_others": false, "boost_adds": -3376},
+      "2026-05": {"trades": 7,  "avg_pnl": 990,   "beats_others": true,  "boost_adds": 6929},
+      "2026-06": {"trades": 3,  "avg_pnl": -420,  "beats_others": false, "boost_adds": -1259},
+      "2026-07": {"trades": 2,  "avg_pnl": 876,   "beats_others": true,  "boost_adds": 1753}
+    },
+    "dte5_monthly": {
+      "2026-02": {"trades": 3,  "avg_pnl": -450, "wr": 0},
+      "2026-03": {"trades": 14, "avg_pnl": 284,  "wr": 29},
+      "2026-04": {"trades": 9,  "avg_pnl": 15,   "wr": 33},
+      "2026-05": {"trades": 8,  "avg_pnl": -84,  "wr": 12},
+      "2026-06": {"trades": 7,  "avg_pnl": -87,  "wr": 29},
+      "2026-07": {"trades": 6,  "avg_pnl": 1013, "wr": 33}
+    }
+  },
+  "findings": {
+    "FINDING-1": {
+      "title": "Drop DTE=5 HURTS vs baseline (-37.8pp) despite DTE=5 being the weakest avg P&L bucket",
+      "detail": "DTE=5 contributed total +₹7,545 (47 trades, avg +₹161). Removing them lowers total return despite the low average because they are slightly net-positive. The weak avg P&L is partly due to July's DTE=5 avg +₹1,013 (6 trades) being offset by losing months (Feb avg -₹450, May avg -₹84, Jun avg -₹87).",
+      "implication": "Average P&L of a DTE bucket does NOT justify filtering it out if it's net-positive. More data needed to establish whether DTE=5 is structurally weak."
+    },
+    "FINDING-2": {
+      "title": "DTE=1 sizing 2x improves returns (+258pp) but is concentrated in Feb+Mar high-ATR regime",
+      "detail": "DTE=1 outperforms other DTE buckets in 4/6 months (+Feb, +Mar, +May, +Jul) but underperforms in Apr (-338 avg) and Jun (-420 avg). Boost adds +₹47,595 in Feb+Mar alone vs -₹4,635 in Apr+Jun. In sustained low-volatility months (Jun avg ATR ~24, Apr ~26), DTE=1 options decay too fast relative to spot movement.",
+      "implication": "DTE=1 outperformance is REGIME-CONDITIONAL, not structural. It works in sustained high-ATR environments but fails in moderate-ATR periods — the same market condition ATR>30 filter was meant to select."
+    },
+    "FINDING-3": {
+      "title": "All DTE effects trace back to ATR regime, not DTE per se",
+      "detail": "When ATR is high throughout the week (Feb: 26pts, Mar: 37pts), DTE=1 options have explosive gamma. When ATR normalizes by mid-week even if it spiked at entry, DTE=1 trades fail (Apr, Jun). The 10-bar ATR entry filter doesn't guarantee that volatility persists to expiry — that requires a regime-level (multi-day) ATR signal, not a bar-level one.",
+      "implication": "The real missing feature is SUSTAINED ATR or a weekly ATR regime indicator. Bar-level ATR>30 correctly admits trades only when volatility is currently high but does not guarantee it stays elevated for the full DTE=1 hold."
+    }
+  },
+  "conclusion": "HYPOTHESIS REJECTED. Neither DTE=5 filtering nor DTE=1 sizing adds reliable value on top of the ATR>30 filter with 6 months of data. Both rules are dominated by the Feb+Mar high-vol regime. The ATR>30 filter remains the single validated signal. CRITICAL DATA GAP: All current research rests on one 6-month window containing one clear high-vol regime (March). Every incremental rule tested beyond ATR>30 shows regime-specific, not structural, behavior. Further experimentation on this dataset risks layer-by-layer in-sample fitting. The highest-priority action is DATA-001: acquire 2023-2025 historical NIFTY 5-min data to test ATR>30 filter across multiple regime cycles.",
+  "priority_next_action": {
+    "action": "DATA-001: Acquire 2023-2025 historical data",
+    "rationale": "All findings beyond ATR>30 are single-regime artifacts. Adding more rules on 6 months of data is overfitting. Only more data can determine which findings are structural."
+  }
+}
