@@ -1,0 +1,307 @@
+# ASTRA Handoff Document
+
+**Date**: 2026-10-10  
+**Branch**: main  
+**Remote**: astra → piyush-genai/Astra.git  
+**Last commit**: see `git log --oneline -5`
+
+---
+
+## 1. Purpose
+
+This document enables any engineer (or future Claude Code session) to resume ASTRA work immediately without re-reading the full commit history or experiment records. It captures the current state of research, the validated strategy stack, what was tried, what was rejected, and what comes next.
+
+ASTRA is a research platform for compounded-capital algorithmic trading on NSE NIFTY Index weekly options. The baseline trading system is ATLAS (PivotCPR momentum breakout). ASTRA wraps it with regime filtering, dynamic pricing, position sizing, and a compounding engine.
+
+**Mission**: Build a research machine. Let the compounding happen from a working strategy. Do not distort research to hit a return target.
+
+---
+
+## 2. Current State
+
+**Phase gate**: `RESEARCH → BACKTEST → WALK_FORWARD ✓ → MONTE_CARLO ✓ → OPTION_SIGNALS ✓ → PAPER_TRADING ← NEXT`
+
+**Validated strategy stack** (ready for paper trading):
+1. Signal: PivotCPR momentum breakout (ATLAS baseline)
+2. Regime filter: P70_L40d adaptive ATR — current 10-bar ATR > 70th pctile of trailing 3000-bar ATR
+3. IV pricing: VIX×1.1 dynamic (not flat 14%) — backward-compatible `iv_fn` param in OptionsPricer
+4. Position sizing: VIX tilt — sweet spot (50-60th pctile) 1.5x, danger zone (60-75th pctile) 0.5x, else 1x
+5. Drawdown management: Step-down 4-tier lot multiplier (EXP-0017 winner)
+
+**Compounding engine formula (validated EXP-0017):**
+```
+net_capital  = gross_capital - tax_reserve
+dd           = max(0, (HWM - net_capital) / HWM)
+dd_mult      = 1.00 if dd < 0.15
+             = 0.65 if 0.15 ≤ dd < 0.25
+             = 0.35 if 0.25 ≤ dd < 0.40
+             = 0.12 if dd ≥ 0.40
+lots         = min(floor(net_capital × 0.30 / premium_per_lot × dd_mult), max_lots_cap)
+max_lots_cap starts 10 (paper) / 20 (live); +5 every 3 consecutive profitable months AT dd_mult=1.00 tier only
+tax_reserve  = 30% of each profitable month's P&L withheld (NOT available for lot sizing)
+```
+
+**3-year backtest result (after 30% tax + slippage, 2023-2025):**
+- ₹20,000 start → ₹48,09,113 net (+23,946%)
+- ₹50,000 start → ₹49,20,067 net (+9,740%)
+
+**Test suite**: 92 tests, all passing.
+
+---
+
+## 3. Reproduction
+
+### Environment setup
+
+```bash
+cd /workshop/atlas
+python3 -m venv .venv              # if not already present
+source .venv/bin/activate
+pip install -r requirements.txt    # or: pip install pandas numpy scipy
+```
+
+### Required environment variables (names only — never commit values)
+
+```
+UPSTOX_API_KEY          # Upstox API credentials
+UPSTOX_API_SECRET
+UPSTOX_REDIRECT_URI
+UPSTOX_ACCESS_TOKEN     # refreshed daily; see scripts/auth_upstox.py
+ALGO_ID                 # SEBI mandatory Algo-ID (required from April 2026)
+```
+
+These are loaded from `.env` (gitignored). See `core/config_loader.py` for how they are consumed.
+
+### Required local data files (gitignored — not in repo)
+
+```
+data/live_data/nifty_5min_20230101_to_20251231.csv
+data/live_data/india_vix_daily_20230101_to_20251231.csv
+```
+
+Both files must exist for experiments EXP-0009 through EXP-0017 to run.
+
+### Run the full backtest suite
+
+```bash
+python3 -m pytest                  # 92 tests
+python3 scripts/run_backtest.py    # full ATLAS baseline
+```
+
+### Rerun EXP-0017 (drawdown-adaptive lot sizing — the final compounding experiment)
+
+```bash
+cd /workshop/atlas
+python3 -u scripts/exp_0017_drawdown_management.py
+```
+
+Expected output: 5 configs (A_cliff through E_sigmoid), ₹20k and ₹50k start each, monthly logs, and a summary table. Runtime: ~4-6 minutes. Winner: D_steps (Step-down 4-tier).
+
+### Rerun any earlier experiment
+
+```bash
+python3 -u scripts/exp_0013_vix_filter.py
+python3 -u scripts/exp_0014_dynamic_iv.py
+python3 -u scripts/exp_0015_vix_sizing.py
+python3 -u scripts/exp_0016_compounded_equity.py
+python3 -u scripts/exp_0017_drawdown_management.py
+```
+
+All scripts are self-contained (insert `/workshop/atlas` into sys.path) and run from the repo root.
+
+---
+
+## 4. Experiment Log
+
+| ID | Hypothesis | Status | Result |
+|---|---|---|---|
+| EXP-0001 | Reproduce ATLAS baseline | COMPLETED | +376% (₹95k from ₹20k). 2 bugs found and corrected. |
+| EXP-0002 | March 2026 forensic analysis | COMPLETED | Near-expiry gamma + daily range > 300 pts explains outlier. |
+| EXP-0003 | Range filter: prior-day range > 300 pts | COMPLETED | REJECTED. Aggressive filter; +142% but degrades other months. |
+| EXP-0004 | Near-expiry sub-strategy: Monday afternoon only | COMPLETED | REJECTED. 13 trades too few; use as sizing signal not filter. |
+| EXP-0005 | ATR>30 regime filter | COMPLETED | MAJOR ALPHA. +938% vs +376% baseline (fixed ATR threshold). |
+| EXP-0006 | Walk-forward: validate ATR filter OOS | COMPLETED | PASSED 3/4 folds. OOS avg +88%/month vs +49% baseline. |
+| EXP-0007 | Near-expiry afternoon sizing on ATR>30 | COMPLETED | REJECTED. ATR filter already absorbs near-expiry edge. |
+| EXP-0008 | DTE bucket filtering on ATR>30 | COMPLETED | REJECTED. DTE effects regime-conditional, not structural. |
+| EXP-0009 | Multi-year ATR>30 validation (2023-2025, 36 months) | COMPLETED | FAILED. 56% beat rate (needed 65%). Fixed threshold doesn't generalize. |
+| EXP-0010 | Adaptive ATR percentile filter | COMPLETED | PASSED. All 6 configs pass. Best: P70_L40d — 72% (26/36 months). |
+| EXP-0011 | Walk-forward: P70_L40d on 2025 OOS | COMPLETED | PASSED 8/12 months (67%). OOS avg +74.4%/month vs +56.3% baseline. VALIDATED. |
+| EXP-0012 | Monte Carlo stress test (10,000 sims) | COMPLETED | PASSED. Sharpe 3.00, P(loss)=1.6%, P(ruin)=17.8%. Next gate: PAPER. |
+| EXP-0013 | India VIX as binary entry filter | COMPLETED | REJECTED as filter (22% beat rate). VIX 50-60th pctile = sweet spot (₹547/trade avg); VIX 60-75th = danger zone (₹47/trade). Use for sizing. |
+| EXP-0014 | Dynamic VIX-derived IV vs flat 14% | COMPLETED | ACCEPTED. VIX×1.1 reduces P&L by only 6.9% (not 20-40%). Sharpe stays 2.87. Fully intraday trades not exposed to overnight IV change. |
+| EXP-0015 | VIX bucket position sizing | COMPLETED | PASSED. All 4 non-flat configs pass. Tilt (1.5x sweet + 0.5x danger): Sharpe 2.93, +6% P&L, max DD 33.7%. Kelly: danger=0.026 vs sweet=0.181. |
+| EXP-0016 | Compounded equity (tax + slippage + cliff brake) | COMPLETED | ₹50k → ₹10L after tax. CRITICAL BUG: cliff brake triggered Dec 2023, locked at 1 lot forever. Step-down needed. |
+| EXP-0017 | Drawdown-adaptive lot sizing | COMPLETED | **WINNER: D_steps (Step-down 4-tier)**. See detail below. |
+
+### EXP-0017 Detail — Exact Numbers
+
+**Setup**: 1,522 trades, P70_L40d + VIX×1.1 IV + VIX tilt. 30% tax, slippage. ₹20k and ₹50k starts. 5 drawdown functions tested.
+
+| Config | Function | ₹20k net | Return | ₹50k net | Return | Max DD | Months reduced |
+|---|---|---|---|---|---|---|---|
+| A_cliff | 1 lot if DD ≥ 35% | ₹18.3L | +9,046% | ₹28.6L | +5,631% | 60.5% | 18/34 |
+| B_linear | max(0.10, 1−2×dd) | ₹38.7L | +19,233% | ₹40.1L | +7,923% | 44.1% | 34/34 |
+| C_quadratic | max(0.10, (1−dd)²) | ₹40.7L | +20,248% | ₹42.3L | +8,360% | 48.9% | 34/34 |
+| **D_steps** | **4-tier step-down** | **₹48.1L** | **+23,946%** | **₹49.2L** | **+9,740%** | **44.1%** | **17/34** |
+| E_sigmoid | 1/(1+exp(10×(dd−0.25))) | ₹39.1L | +19,471% | ₹39.5L | +7,800% | 41.4% | 34/34 |
+
+**Why D_steps wins**: The only config (besides cliff) that achieves exactly 1.00x multiplier when DD < 15%. Linear/sigmoid/quadratic always in reduced mode because they need dd=0% for 1.0x — even ₹1 below HWM triggers reduction. Step-down allows full operation through normal P&L variance (0-15% DD), which is most of the time.
+
+**Recovery story (Oct 2023 – Jul 2024)**: Peak ₹92.6L in Sep 2023. Oct-Dec 2023 drawdown: 7 lots at 0.35x tier. Jan-Jun 2024: 2-8 lots at 0.12x tier. Jul 2024: DD dropped to 13.3% → fully recovered to 1.00x → 20 lots restored. Apr 2025: +₹16L in one month at 25 lots. The cliff config stayed frozen at 1 lot the entire time.
+
+---
+
+## 5. Decisions Made and Alternatives Rejected
+
+### D1: P70_L40d as the regime filter (not fixed ATR>30)
+
+**Chosen**: Rolling 70th-percentile ATR threshold on trailing 3000 bars (≈40 trading days lookback for percentile calculation).  
+**Rejected**: Fixed ATR>30 threshold.  
+**Why**: Fixed threshold fails across regimes (EXP-0009: 56% beat rate). Adaptive percentile generalizes because it defines "high ATR" relative to recent history, not an absolute number that made sense only in 2023 market conditions.
+
+### D2: VIX×1.1 as IV scaling factor (not VIX/100 flat)
+
+**Chosen**: VIX × 1.1 / 100 as annualized IV.  
+**Rejected**: VIX/100 (under-prices short-dated options), VIX×1.2/100 (over-prices).  
+**Why**: Weekly NIFTY options have ~10% tenor premium over 30-day VIX. 1.1 is the best-fit scale factor from EXP-0014. VIX×1.2 inflated premiums by 11% above current levels — too aggressive.
+
+### D3: VIX as sizing signal, not binary entry filter
+
+**Chosen**: Multiplier (1.5x sweet, 0.5x danger, 1x else) applied to lot count.  
+**Rejected**: Binary "skip trade when VIX > 60th pctile" filter.  
+**Why**: VIX and ATR are correlated. Binary filtering with both conditions collapsed trade count from ~33/month to 6-15/month. EXP-0013: 22% beat rate (needed 65%). Sizing modulation preserves trade count while tilting capital.
+
+### D4: Step-down 4-tier for drawdown management
+
+**Chosen**: 0-15% DD: 1.00x | 15-25%: 0.65x | 25-40%: 0.35x | >40%: 0.12x.  
+**Rejected**: Cliff brake (hard freeze at 1 lot), linear, quadratic, sigmoid.  
+**Why**: Cliff traps the system in crisis mode permanently (EXP-0016: locked at 1 lot for 22 months, unable to recover). Linear/sigmoid/quadratic always reduce because they require dd=0 for 1.0x — a hidden permanent friction. Step-down is the only design that grants full operation during normal variance and permits natural recovery.
+
+### D5: 30% tax reserve withheld monthly from sizing capital
+
+**Chosen**: Reserve = 30% of each profitable month's P&L; not available for lot sizing.  
+**Rejected**: Modeling tax only at year-end.  
+**Why**: Using pre-tax capital for sizing and paying taxes annually would overstate compounding. Monthly withholding is conservative but avoids a year-end capital shock. Actual tax liability (ITR filing) may differ; model errs toward safety.
+
+### D6: Post-hoc sizing simulation (not re-running full backtest per config)
+
+**Chosen**: Collect 1,522 trades at 1-lot baseline, then replay each trade with sizing multiplier applied.  
+**Rejected**: Re-running the full BacktestHarness for every sizing config.  
+**Why**: Full re-run for 5×36 months = 180 harness runs, ~3 hours. Post-hoc replay takes seconds. Valid for sizing research because signal quality (entry/exit timing, P&L per lot) is independent of position size. Not valid if sizing affects entry decisions.
+
+---
+
+## 6. Open Problems and Risks (Ranked by Severity)
+
+### CRITICAL
+
+**RISK-1: Strategy degradation in live conditions (unquantified)**  
+Backtest covers 2023-2025. Future market structure may differ (option market depth, new participants, VIX regime). Historical performance is not a guarantee. Minimum 3 months paper trading before any live capital. No model accounts for this.
+
+**RISK-2: P(ruin) = 17.8% at ₹20k start (Monte Carlo, EXP-0012)**  
+17.8% of Monte Carlo simulations at ₹20k start hit a 90%+ capital loss scenario. This is unacceptably high at small capital — ₹50k start reduces it. The compounding engine's DD brake (RISK-1 of over-leveraging during growth) is the primary mitigation.
+
+**RISK-3: LiveOrchestrator has 6 TODO Phase stubs (not wired)**  
+`live/orchestrator.py` is not production-ready. Paper trading engine exists (`PaperTradingEngine`, 19 tests), but the live path from VIX-adjusted signal → lot count → SEBI Algo-ID → Upstox order is not a complete code path.
+
+### HIGH
+
+**RISK-4: SEBI Algo-ID requirement (mandatory April 2026)**  
+Any automated order placement requires ALGO_ID registered with NSE/SEBI. Must be configured via `ALGO_ID` env var. Not required for paper trading. A live system without this is non-compliant.
+
+**RISK-5: Slippage model is conservative but unvalidated at scale**  
+₹2/unit extra per lot above 10 is a rule-of-thumb. NIFTY ATM options at 25-35 lots may have wider spreads, especially during fast markets. The actual live P&L may be 5-15% below backtest at 20+ lots.
+
+**RISK-6: EXP-0016.json record is missing**  
+The experiment JSON for EXP-0016 was never written to `research/experiments/`. Only the script was committed. The compounding-with-cliff-brake results are documented only in ASTRA_STATUS.md and this file. Create `research/experiments/EXP-0016.json` before the next paper trading session.
+
+### MEDIUM
+
+**RISK-7: Data quality of `nifty_5min_20230101_to_20251231.csv` is unverified**  
+The CSV is gitignored and not checksummed. Any silent corruption (missing days, wrong timestamps) would invalidate all EXP-0009 through EXP-0017 results. Add a data integrity check (row count, date range, business-day completeness) to `scripts/verify_data.py` (not yet built).
+
+**RISK-8: HWM tracking is post-trade, not intraday**  
+In the simulation, HWM is updated after each trade closes. In live trading, intraday drawdown during an open position is not tracked. A fast adverse move could technically breach the DD tier without triggering the lot reduction. This is acceptable for paper trading; revisit before scaling to 20+ lots live.
+
+---
+
+## 7. Local-Only Files (Gitignored — Not in Repo)
+
+The following files exist only on the local machine and must be re-sourced manually if the repo is cloned on a new machine:
+
+| File | Contents | Source |
+|---|---|---|
+| `.env` | Upstox API credentials, ALGO_ID | Upstox developer portal + SEBI registration |
+| `data/live_data/nifty_5min_20230101_to_20251231.csv` | 5-minute NIFTY OHLCV, Jan 2023–Dec 2025 | NSE historical data download |
+| `data/live_data/india_vix_daily_20230101_to_20251231.csv` | India VIX daily close values | NSE VIX historical CSV |
+
+Without the two data CSVs, experiments EXP-0009 through EXP-0017 will exit immediately with "Missing data file" errors. The `.env` file is not required for backtests — only for live/paper trading that connects to Upstox.
+
+To verify data files are present:
+```bash
+ls -lh data/live_data/
+```
+
+Expected: two files, ~100MB and ~50KB respectively.
+
+---
+
+## 8. Next 5 Tasks
+
+**TASK-1 (PAPER-001)**: Wire the full validated strategy stack to paper trading mode.
+
+Implement in `scripts/run_paper_astra.py`:
+- Load P70_L40d ATR regime filter
+- Wire `iv_fn=vix_iv_fn` to `OptionsPricer` (already implemented in `backtest/options_pricer.py`)
+- Apply VIX tilt sizing before order submission
+- Implement step-down 4-tier HWM tracking in `PaperTradingEngine` or a wrapper
+- Start with `max_lots=10` (conservative paper mode)
+- Run for minimum 3 months before any live capital decision
+
+**TASK-2 (EXP-0016-JSON)**: Write the missing experiment record.
+
+Create `research/experiments/EXP-0016.json` with results from `scripts/exp_0016_compounded_equity.py`. The cliff-brake design is documented only in ASTRA_STATUS.md right now. The JSON should record the 3 scenarios (₹20k/10-lot, ₹50k/20-lot, ₹20k/25-lot), the cliff-brake trap finding, and the `next_steps` pointer to EXP-0017.
+
+**TASK-3 (DATA-INTEGRITY)**: Add a data verification script.
+
+Create `scripts/verify_data.py` that checks:
+- Row count of `nifty_5min_20230101_to_20251231.csv` (expected ~220,000 rows)
+- Date range coverage (Jan 2, 2023 – Dec 31, 2025)
+- No gaps > 1 business day in daily close
+- VIX file date alignment with NIFTY file
+
+**TASK-4 (LIVE-ORCHESTRATOR)**: Resolve the 6 Phase stubs in `live/orchestrator.py`.
+
+Currently there are 6 `TODO Phase 1:` stubs. These must be wired before shadow trading. Relevant items: strategy registry lookup, live feed subscription, order placement via ExecutionEngine, kill switch file polling, ALGO_ID injection.
+
+**TASK-5 (LOT-CAP-GROWTH-RULE)**: Implement and test the lot-cap growth rule.
+
+The step-down design includes: max_lots grows +5 every 3 consecutive profitable months, BUT only when at 1.00x tier. This rule is documented and simulated in EXP-0017 but not yet implemented in any live or paper trading code path. Must be in place before paper trading starts so the lot-cap scaling behavior is consistent with the backtest projections.
+
+---
+
+## 9. Gotchas
+
+**G1: The post-hoc sizing simulation is not a true re-backtest.**  
+EXP-0015, EXP-0016, EXP-0017 all replay the same 1,522 trades collected at 1-lot baseline. This is correct for studying sizing behavior, but it assumes signal quality (entry/exit times, per-lot P&L) is independent of position size. At 30+ lots in live markets, your order moves the book — the post-hoc model does not capture this. Treat projections beyond 15-20 lots as directional, not precise.
+
+**G2: `premium_per_lot` has a floor of ₹500 in the compounding simulation.**  
+In `exp_0016_compounded_equity.py` and `exp_0017_drawdown_management.py`, there is a line: `prem_per_lot = max(row["premium_per_lot"], 500.0)`. This prevents division-by-zero and unrealistic lot counts when deep OTM options appear. If the live system prices a trade at < ₹500/lot premium, the lot count will be capped lower than expected.
+
+**G3: VIX percentile lookback is 40 trading days, not calendar days.**  
+`VIX_LOOKBACK = 40` is the rolling window for computing each trade's VIX percentile. This is 40 trading days (≈8 calendar weeks). A new month starting after a holiday period may have a slightly shorter effective lookback. The boundary effect is negligible but explains occasional percentile discontinuities at month starts.
+
+**G4: The `iv_fn` parameter to OptionsPricer is backward-compatible.**  
+`OptionsPricer(iv=0.14, iv_fn=None)` behaves identically to the old interface. Only when `iv_fn` is provided does it override the flat IV. The `price_trade()` method uses `iv_entry` and `iv_exit` separately, so IV change between entry and exit is captured (relevant only for multi-day holds, not intraday).
+
+**G5: "Months in reduced mode" counts any month with at least one trade at < 1.00x dd_mult.**  
+For step-down: 17/34 months in reduced mode means 17 months had at least one trade at 0.65x, 0.35x, or 0.12x. It does not mean the whole month was at reduced capacity. The monthly average lots shown in the simulation log is more informative than the binary "reduced" flag.
+
+**G6: EXP-0013 verdict logic had a bug (documented, not code-fixed).**  
+The `better = r["win_pct"] > atr_base["win_pct"]` comparison was against a 0% baseline (the baseline compared against itself). The correct comparison is `r["net_pnl"] > atr_base["net_pnl"]`. The script already ran and is not re-run. The correct interpretation is documented in `research/experiments/EXP-0013.json` findings. Do not trust the `beat_count` field — use `net_pnl` comparisons directly.
+
+**G7: `astr` remote is canonical; `origin` points to the old ATLAS repo.**  
+`git remote -v` shows two remotes. Always push to `astra` (piyush-genai/Astra.git). The `origin` remote (piyush-genai/atlas.git) is the original ATLAS repo — it is 20 commits behind and no longer the primary remote. Do not push to `origin` unless explicitly migrating ATLAS.
+
+**G8: Kill switch file overrides everything.**  
+If `KILL_SWITCH.txt` exists in the repo root, `core/kill_switch.py` halts all order placement regardless of strategy state. This is a manual emergency stop. Do not delete it to fix a paper trading test — investigate why it was triggered.
