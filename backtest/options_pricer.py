@@ -23,7 +23,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Optional
+from typing import Callable, Optional
 
 import pandas as pd
 
@@ -185,12 +185,22 @@ class OptionsPricer:
         strike_step: int = 50,
         iv: float = DEFAULT_IV,
         risk_free_rate: float = DEFAULT_RISK_FREE,
+        iv_fn: Optional[Callable[[pd.Timestamp], float]] = None,
     ) -> None:
         self.lot_size       = lot_size
         self.expiry_weekday = expiry_weekday
         self.strike_step    = strike_step
         self.iv             = iv
         self.r              = risk_free_rate
+        # Optional dynamic IV override: iv_fn(timestamp) → annualized IV float.
+        # When set, overrides flat self.iv for every pricing call.
+        self.iv_fn          = iv_fn
+
+    def _iv_at(self, timestamp: pd.Timestamp) -> float:
+        """Return IV for a given timestamp — dynamic if iv_fn is set, else flat."""
+        if self.iv_fn is not None:
+            return self.iv_fn(timestamp)
+        return self.iv
 
     def premium(
         self,
@@ -201,11 +211,12 @@ class OptionsPricer:
         """Compute ATM option premium at a given spot and timestamp."""
         strike = atm_strike(spot, self.strike_step)
         T      = time_to_expiry_years(timestamp, self.expiry_weekday)
+        iv     = self._iv_at(timestamp)
 
         if option_type == "call":
-            return bs_call_price(spot, strike, T, self.r, self.iv)
+            return bs_call_price(spot, strike, T, self.r, iv)
         else:
-            return bs_put_price(spot, strike, T, self.r, self.iv)
+            return bs_put_price(spot, strike, T, self.r, iv)
 
     def price_trade(
         self,
@@ -223,15 +234,17 @@ class OptionsPricer:
         option_type = "call" if direction == "LONG" else "put"
         strike = entry_strike or atm_strike(entry_spot, self.strike_step)
 
-        T_entry = time_to_expiry_years(entry_time, self.expiry_weekday)
-        T_exit  = time_to_expiry_years(exit_time,  self.expiry_weekday)
+        T_entry   = time_to_expiry_years(entry_time, self.expiry_weekday)
+        T_exit    = time_to_expiry_years(exit_time,  self.expiry_weekday)
+        iv_entry  = self._iv_at(entry_time)
+        iv_exit   = self._iv_at(exit_time)
 
         if option_type == "call":
-            entry_premium = bs_call_price(entry_spot, strike, T_entry, self.r, self.iv)
-            exit_premium  = bs_call_price(exit_spot,  strike, T_exit,  self.r, self.iv)
+            entry_premium = bs_call_price(entry_spot, strike, T_entry, self.r, iv_entry)
+            exit_premium  = bs_call_price(exit_spot,  strike, T_exit,  self.r, iv_exit)
         else:
-            entry_premium = bs_put_price(entry_spot, strike, T_entry, self.r, self.iv)
-            exit_premium  = bs_put_price(exit_spot,  strike, T_exit,  self.r, self.iv)
+            entry_premium = bs_put_price(entry_spot, strike, T_entry, self.r, iv_entry)
+            exit_premium  = bs_put_price(exit_spot,  strike, T_exit,  self.r, iv_exit)
 
         return OptionLeg(
             option_type   = option_type,

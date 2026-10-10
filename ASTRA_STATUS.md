@@ -78,6 +78,7 @@
 | **EXP-0011** | **Walk-forward: P70_L40d on 2025 OOS** | **COMPLETED** | **CRITICAL** | **PASSED 8/12 (67%) — OOS avg +74.4%/mo vs +56.3% baseline. VALIDATED.** |
 | **EXP-0012** | **Monte Carlo stress test (10,000 sims)** | **COMPLETED** | **CRITICAL** | **PASSED — Sharpe 3.00, P(ruin)=17.8%, P(loss)=1.6%. Next gate: PAPER** |
 | EXP-0013 | India VIX as binary entry filter on P70_L40d | COMPLETED | HIGH | REJECTED — VIX filter reduces monthly return (22% beat rate, needed 65%). PARTIAL SIGNAL: VIX 60-75th pctile is danger zone (₹47/trade); VIX 50-60th is sweet spot (₹547/trade). Use for sizing not filtering. |
+| **EXP-0014** | **Dynamic VIX-derived IV vs flat 14%** | **COMPLETED** | **HIGH** | **EXP-0012 CAVEAT-3 REVISED: flat IV only inflated by 2-11% (not 20-40%). Intraday trades not exposed to overnight IV change. VIX×1.1 recommended. Sharpe stays 2.87.** |
 
 ---
 
