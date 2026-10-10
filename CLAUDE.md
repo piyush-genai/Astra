@@ -15,11 +15,15 @@
 **Capital model**: Compounding — profits reinvested into more lots every month
 **Target**: ₹15-20 crore by Dec 2028 via compounded lot scaling (aspiration, not constraint)
 
-**Compounding engine design:**
-- lots = min(floor(capital × 0.30 / premium_per_lot), max_lots_cap)
-- max_lots_cap starts at 10, increases by 5 every 3 profitable months
-- 30% tax reserve withheld each month — not available for lot sizing
-- Drawdown brake: freeze lot count if capital falls 35% from recent peak
+**Compounding engine design (validated EXP-0016/0017):**
+- lots = min(floor(net_capital × 0.30 / premium_per_lot) × dd_mult, max_lots_cap)
+- max_lots_cap starts at 10 (paper) / 20 (live); +5 every 3 consecutive profitable months AT 1.0x tier
+- 30% tax reserve withheld each month from net_capital for sizing
+- Drawdown management: Step-down 4-tier (validated EXP-0017, best outcome ₹50k→₹49.2L after tax)
+    0-15% DD from HWM → 1.00x lots (full operation)
+    15-25% DD         → 0.65x lots (caution)
+    25-40% DD         → 0.35x lots (defense)
+    >40% DD           → 0.12x lots (crisis minimum)
 
 ---
 

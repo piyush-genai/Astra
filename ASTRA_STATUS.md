@@ -86,6 +86,8 @@
 | EXP-0013 | India VIX as binary entry filter on P70_L40d | COMPLETED | HIGH | REJECTED — VIX filter reduces monthly return (22% beat rate, needed 65%). PARTIAL SIGNAL: VIX 60-75th pctile is danger zone (₹47/trade); VIX 50-60th is sweet spot (₹547/trade). Use for sizing not filtering. |
 | **EXP-0014** | **Dynamic VIX-derived IV vs flat 14%** | **COMPLETED** | **HIGH** | **EXP-0012 CAVEAT-3 REVISED: flat IV only inflated by 2-11% (not 20-40%). Intraday trades not exposed to overnight IV change. VIX×1.1 recommended. Sharpe stays 2.87.** |
 | **EXP-0015** | **VIX bucket position sizing** | **COMPLETED** | **HIGH** | **ALL 4 configs PASS. Tilt (sweet 1.5x + danger 0.5x): Sharpe 2.93 (+0.06), +6% P&L, max DD 33.7% (was 39.4%). Gradient: +15.6% P&L. Kelly confirms danger zone (0.026) vs sweet spot (0.181).** |
+| **EXP-0016** | **Compounded equity (tax + slippage + brake)** | **COMPLETED** | **CRITICAL** | **₹50k → ₹10L (after tax, 3yr). Cliff-edge brake trapped at 1 lot for 22 months. Fix needed: gradual lot reduction.** |
+| **EXP-0017** | **Drawdown-adaptive lot sizing** | **COMPLETED** | **CRITICAL** | **Step-down 4-tier wins: ₹50k → ₹49.2L (+9740%) after 30% tax, 3yr. 72% better than cliff. RECOMMENDED for paper trading.** |
 
 ---
 
@@ -172,14 +174,22 @@
 | ₹50,000 | 20 lots | ₹88,48,311 | ~₹60 lakh | ~₹40-50 lakh |
 | ₹20,000 | 50 lots | ₹2,15,70,418 | ~₹1.5 crore | ~₹80 lakh |
 
-**The compounding engine (how lots scale with capital):**
+**The compounding engine (how lots scale with capital) — Step-down 4-tier (validated EXP-0017):**
 ```
-lots = min(floor(capital × 0.30 / premium_per_lot), MAX_LOTS)
-MAX_LOTS: 10 initially → increase by 5 every 3 profitable months
-Capital floor: never fall below 1-lot margin even after drawdowns
-Tax reserve: 30% of each month's net profit withheld, not available for sizing
-Drawdown brake: if capital falls 35% from recent peak, freeze lot count until recovery
+net_capital  = gross_capital - tax_reserve
+dd           = max(0, (HWM - net_capital) / HWM)   ← high-water-mark tracking
+dd_mult      = 1.00 if dd < 0.15        ← normal, full operation
+             = 0.65 if 0.15 ≤ dd < 0.25 ← caution
+             = 0.35 if 0.25 ≤ dd < 0.40 ← defense
+             = 0.12 if dd ≥ 0.40         ← crisis minimum
+lots         = min(floor(net_capital × 0.30 / premium_per_lot × dd_mult), max_lots_cap)
+max_lots_cap = 10 (paper) / 20 (live); +5 every 3 profitable months AT dd_mult=1.00
+tax_reserve  = 30% of each month's net profit withheld (not available for sizing)
 ```
+
+**Compounded projection (after 30% tax, slippage, step-down brake, 3 years 2023-2025):**
+- ₹20,000 start → ₹48,09,113 net (+23,946%)
+- ₹50,000 start → ₹49,20,067 net (+9,740%)
 
 **Path to ₹15-20 crore:**
 - Requires starting capital ₹5-10 lakh OR ₹50k + 3 years of reinvestment + lot cap of 100+
