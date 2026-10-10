@@ -1,0 +1,37 @@
+{
+  "exp_id": "EXP-0004",
+  "hypothesis": "A near-expiry sub-strategy (enter only Monday 13:00-15:20, 1 day before Tuesday expiry) will produce dramatically higher average P&L per trade (>₹2,000) than the unfiltered baseline (₹77).",
+  "status": "COMPLETED",
+  "created_at": "2026-10-10T12:53:08.868074",
+  "updated_at": "2026-10-10T12:55:54.477218+00:00",
+  "git_commit": "5922900",
+  "strategy": "pivot_cpr_strategy",
+  "dataset_version": "nifty-5min-2026-feb-jul",
+  "train_range": [
+    "2026-02-01",
+    "2026-05-31"
+  ],
+  "test_range": [
+    "2026-06-01",
+    "2026-07-31"
+  ],
+  "config": {
+    "tolerance_pct": 0.18,
+    "momentum_enabled": true,
+    "entry_filter": "monday_afternoon_only",
+    "days_to_expiry_max": 1,
+    "session_filter": "AFTERNOON"
+  },
+  "notes": "EXP-0002 FINDING-1: 15 Monday-afternoon 1-day-out trades generated ₹42k (avg ₹2,803). Remaining 64 March trades = ₹-1.6k combined. Test this as a standalone sub-strategy. Key risk: very low trade frequency (3-4 per month). Need at least 30 trades for valid stats → will need longer backtest period beyond Feb-Jul 2026.",
+  "metrics": {
+    "total_trades": 13,
+    "total_return_pct": 27.4,
+    "win_rate_pct": 23.1,
+    "avg_pnl_per_trade": 422,
+    "baseline_avg_pnl_per_trade": 141
+  },
+  "conclusion": "HYPOTHESIS REJECTED (as standalone sub-strategy). Only 13 qualifying trades in 6 months — far below the 30-trade minimum for statistical significance. However, avg P&L/trade (₹422) is 3x baseline (₹141), confirming the quality is there. RECOMMENDATION: Do not use as standalone strategy due to insufficient frequency. Instead, use near-expiry status as a POSITION SIZING SIGNAL — increase lots by 2-3x when days_to_expiry=1 and session is AFTERNOON. Needs much longer data history (12+ months) for proper validation.",
+  "leakage_checked": true,
+  "walk_forward_done": false,
+  "monte_carlo_done": false
+}

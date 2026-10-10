@@ -1,0 +1,56 @@
+{
+  "exp_id": "EXP-0003",
+  "hypothesis": "Filtering trades to only days with daily range > 300 pts will significantly improve Sharpe ratio and average P&L per trade while maintaining positive total returns.",
+  "status": "COMPLETED",
+  "created_at": "2026-10-10T12:53:08.868074",
+  "updated_at": "2026-10-10T12:54:01.245749+00:00",
+  "git_commit": "5922900",
+  "strategy": "pivot_cpr_strategy",
+  "dataset_version": "nifty-5min-2026-feb-jul",
+  "train_range": [
+    "2026-02-01",
+    "2026-05-31"
+  ],
+  "test_range": [
+    "2026-06-01",
+    "2026-07-31"
+  ],
+  "config": {
+    "tolerance_pct": 0.18,
+    "momentum_enabled": true,
+    "day_range_filter_pts": 300
+  },
+  "notes": "EXP-0002 found avg P&L: <200pts=-₹53, 200-300=+₹97, 300-400=+₹277, 400-600=+₹604. Test: skip days with opening daily range estimate < 300 pts. Use prior-day range as proxy for current-day range (no look-ahead). Baseline: EXP-0001 corrected result (+376%, 532 trades, 32.1% WR).",
+  "metrics": {
+    "baseline": {
+      "final_capital": 95270,
+      "return_pct": 376.4,
+      "total_trades": 532,
+      "win_rate": 32.1,
+      "avg_pnl_per_trade": 141
+    },
+    "range_filter_300": {
+      "final_capital": 48422,
+      "return_pct": 142.1,
+      "total_trades": 166,
+      "win_rate": 30.7,
+      "avg_pnl_per_trade": 171
+    },
+    "days_filtered_pct": {
+      "Feb": 67,
+      "Mar": 32,
+      "Apr": 60,
+      "May": 74,
+      "Jun": 67,
+      "Jul": 96
+    }
+  },
+  "conclusion": "HYPOTHESIS PARTIALLY CONFIRMED. Range filter (>300pts prior-day) improves avg P&L per trade by +21% (₹141→₹171) but reduces total returns from +376% to +142% because 96% of July days are filtered out, eliminating a profitable month entirely. The filter is too aggressive with a single hard threshold. FINDING: The range/ATR relationship is monotonic up to 600 pts but a hard binary filter destroys value in low-range months that still have profitable setups. NEXT: Test softer regime-weighting (position size scaling) rather than hard binary filter.",
+  "leakage_checked": true,
+  "walk_forward_done": false,
+  "monte_carlo_done": false,
+  "next_steps": [
+    "EXP-0005: ATR-based position scaling (scale lots by ATR ratio, not binary cut)",
+    "EXP-0004: Near-expiry sub-strategy still valuable regardless of this result"
+  ]
+}

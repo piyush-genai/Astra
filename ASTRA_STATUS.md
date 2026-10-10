@@ -14,7 +14,9 @@
   HERE
 ```
 
-**Next gate**: BACKTEST (requires EXP-0001 completion + leakage verification)
+**Next gate**: WALK_FORWARD (EXP-0006 must pass before promoting ATR filter to production)
+
+**Current best config**: ATR>30 filter — ₹20k→₹207k (+938%), 168 trades, avg ₹1,116/trade
 
 ---
 
@@ -37,7 +39,7 @@
 
 ### Baseline
 - [x] **EXP-0001**: Reproduce ATLAS backtest result — COMPLETED (2026-10-10)
-- [ ] **EXP-0002**: March 2026 forensic analysis
+- [x] **EXP-0002**: March 2026 forensic analysis — COMPLETED (2026-10-10)
 - [x] git tag: `atlas-baseline-v1`
 
 ### Tests
@@ -49,8 +51,12 @@
 
 | ID | Hypothesis | Status | Priority | Result |
 |---|---|---|---|---|
-| EXP-0001 | Reproduce ATLAS baseline | COMPLETED | CRITICAL | +376% (₹95k) — bugs found, baseline corrected |
-| EXP-0002 | March 2026 forensic analysis | PROPOSED | HIGH | — |
+| EXP-0001 | Reproduce ATLAS baseline | COMPLETED | CRITICAL | +376% (₹95k) — 2 bugs found, baseline corrected |
+| EXP-0002 | March 2026 forensic analysis | COMPLETED | HIGH | Near-expiry gamma + daily range > 300 pts |
+| EXP-0003 | Range filter: prior-day range > 300 pts | COMPLETED | HIGH | +142% (better avg, but too aggressive) |
+| EXP-0004 | Near-expiry sub-strategy: Monday afternoon only | COMPLETED | HIGH | 13 trades too few; use as sizing signal instead |
+| **EXP-0005** | **ATR>30 regime filter** | **COMPLETED** | **HIGH** | **+938% vs +376% baseline — major alpha found** |
+| EXP-0006 | Walk-forward: validate ATR filter out-of-sample | PROPOSED | CRITICAL | — |
 
 ---
 

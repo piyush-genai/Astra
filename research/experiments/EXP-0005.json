@@ -1,0 +1,61 @@
+{
+  "exp_id": "EXP-0005",
+  "hypothesis": "Entering trading mode only when the 10-bar rolling ATR exceeds 30 pts (5-min bars) will filter out low-volatility choppy sessions and improve risk-adjusted returns.",
+  "status": "COMPLETED",
+  "created_at": "2026-10-10T12:53:08.868074",
+  "updated_at": "2026-10-10T12:55:54.477218+00:00",
+  "git_commit": "5922900",
+  "strategy": "pivot_cpr_strategy",
+  "dataset_version": "nifty-5min-2026-feb-jul",
+  "train_range": [
+    "2026-02-01",
+    "2026-05-31"
+  ],
+  "test_range": [
+    "2026-06-01",
+    "2026-07-31"
+  ],
+  "config": {
+    "tolerance_pct": 0.18,
+    "momentum_enabled": true,
+    "atr_regime_filter_pts": 30,
+    "atr_window": 10
+  },
+  "notes": "EXP-0002 FINDING-5: March ATR=37.58 (profitable), Jul ATR=19.58 (low return), Jun ATR=23.97. ATR filter is computable in real-time (no look-ahead). Combined with EXP-0003 range filter, this creates a two-condition regime gate. Test independently first, then combine with EXP-0003.",
+  "metrics": {
+    "baseline": {
+      "final_capital": 95270,
+      "return_pct": 376.4,
+      "trades": 532,
+      "avg_pnl": 141
+    },
+    "atr_gt_25": {
+      "final_capital": 197263,
+      "return_pct": 886.3,
+      "trades": 262,
+      "avg_pnl": 677
+    },
+    "atr_gt_30": {
+      "final_capital": 207540,
+      "return_pct": 937.7,
+      "trades": 168,
+      "avg_pnl": 1116
+    },
+    "atr_gt_35": {
+      "final_capital": 241606,
+      "return_pct": 1108.0,
+      "trades": 104,
+      "avg_pnl": 2131
+    }
+  },
+  "conclusion": "HYPOTHESIS CONFIRMED. ATR regime filter is highly predictive of strategy edge. ATR>35: +1108% vs +376% baseline (3x), avg ₹2,131/trade vs ₹141 (15x), 104 trades vs 532. CRITICAL FINDING: Every month becomes positive or near-zero with ATR>35 filter. February flips from -37.2% to +74.4%. May flips from -12% to +3.5%. IMPORTANT CAVEAT: This is fully in-sample — the ATR threshold itself was selected by looking at results. MUST validate via walk-forward before trusting. Next: EXP-0006 walk-forward validation of ATR filter.",
+  "leakage_checked": true,
+  "walk_forward_done": false,
+  "monte_carlo_done": false,
+  "regime_filter": {
+    "feature": "10-bar rolling ATR on 5-min NIFTY bars",
+    "recommended_threshold": 30,
+    "rationale": "ATR>30 gives best balance of trade count (168 = statistically meaningful) vs performance improvement (2.5x return, 7.9x avg P&L)",
+    "look_ahead": "NONE — ATR uses only past 10 bars, computable in real time"
+  }
+}
