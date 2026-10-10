@@ -161,17 +161,39 @@
 
 ## Capital Goal Context
 
-**Aspiration**: ₹25 Crore by Dec 2028  
-**Starting capital**: ₹20,000  
-**Current approach**: Build the research machine first; let the edge discovery determine the achievable return
+**Aspiration**: ₹15-20 Crore by Dec 2028  
+**Starting capital**: ₹20,000–₹50,000  
+**Current approach**: Compound capital — reinvest profits into more lots as capital grows
 
-Monthly return scenarios:
-| Scenario | Monthly Return | Path to ₹25Cr |
+**Compounded backtest projections (2023-2025 validated data, EXP-0016):**
+| Start | Lot cap | 3-yr end (GROSS) | After 30% tax | After slippage |
+|---|---|---|---|---|
+| ₹20,000 | 10 lots | ₹44,12,853 | ~₹30 lakh | ~₹20-25 lakh |
+| ₹50,000 | 20 lots | ₹88,48,311 | ~₹60 lakh | ~₹40-50 lakh |
+| ₹20,000 | 50 lots | ₹2,15,70,418 | ~₹1.5 crore | ~₹80 lakh |
+
+**The compounding engine (how lots scale with capital):**
+```
+lots = min(floor(capital × 0.30 / premium_per_lot), MAX_LOTS)
+MAX_LOTS: 10 initially → increase by 5 every 3 profitable months
+Capital floor: never fall below 1-lot margin even after drawdowns
+Tax reserve: 30% of each month's net profit withheld, not available for sizing
+Drawdown brake: if capital falls 35% from recent peak, freeze lot count until recovery
+```
+
+**Path to ₹15-20 crore:**
+- Requires starting capital ₹5-10 lakh OR ₹50k + 3 years of reinvestment + lot cap of 100+
+- ₹15 crore from ₹50k requires ~180x return, achievable in theory at 50+ lots over 3 years
+- BUT: every drawdown month at large capital is psychologically severe (May 2024 = -30.8%)
+- Strategy must be validated in paper trading for 3 months before any capital increase
+
+Monthly return scenarios (at scale):
+| Scenario | Monthly Return | Notes |
 |---|---|---|
-| Poor | < 3% | Insufficient — improve strategy |
-| Good | 3–8% | Requires additional capital injection |
-| Excellent | 8–15% | Achievable with scaling |
-| Extraordinary | > 15% | Investigate deeply before trusting |
+| Poor | < 3% | ATR regime not active — reduce exposure |
+| Good | 5–15% | Standard operating mode |
+| Excellent | 15–40% | High-regime months (Apr 2025: +28.5%) |
+| Extraordinary | > 40% | Investigate — could be data anomaly |
 
-**Do not optimize ASTRA to hit the ₹25Cr target. Build the research machine.
-The capital goal is an aspiration, not a constraint on research integrity.**
+**Do not optimize ASTRA to hit the ₹15-20Cr target. Build the research machine.
+The compounding happens automatically from a working strategy — force it and you distort the research.**

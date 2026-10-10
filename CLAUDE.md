@@ -11,8 +11,15 @@
 **Baseline system**: ATLAS (Nifty 50 options, Pivot+CPR strategy)
 **Broker**: Upstox V2/V3 API
 **Instrument**: NSE NIFTY Index Options (weekly expiry, Tuesdays)
-**Capital start**: ₹20,000
-**Target**: Scalable risk-adjusted alpha — not a hard return number
+**Capital start**: ₹20,000–₹50,000
+**Capital model**: Compounding — profits reinvested into more lots every month
+**Target**: ₹15-20 crore by Dec 2028 via compounded lot scaling (aspiration, not constraint)
+
+**Compounding engine design:**
+- lots = min(floor(capital × 0.30 / premium_per_lot), max_lots_cap)
+- max_lots_cap starts at 10, increases by 5 every 3 profitable months
+- 30% tax reserve withheld each month — not available for lot sizing
+- Drawdown brake: freeze lot count if capital falls 35% from recent peak
 
 ---
 
