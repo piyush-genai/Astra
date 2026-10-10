@@ -21,7 +21,7 @@
 
 **Critical caveat**: Only 6 months of data; one clear high-vol cycle. Need 2023-2025 data before production confidence.
 
-**BLOCKING**: DATA-001 — further incremental rule-testing on this 6-month dataset is high-risk overfitting. All findings beyond ATR>30 show regime-specific behavior. Acquire 2023-2025 NIFTY 5-min data to validate ATR>30 across multiple cycles before adding any new rules.
+**EXP-0009 CRITICAL FINDING**: ATR>30 fixed threshold fails multi-year test (56% vs 65% needed). Root cause: fixed 30-pt threshold calibrated on extreme 2026 outlier; ATR rarely exceeds 30 in 2023-2025 normal markets. MED-regime (ATR 20-30) shows 61% win rate — the regime-filter idea is sound but the threshold must be adaptive. Next: EXP-0010 percentile-based ATR filter.
 
 ---
 
@@ -64,6 +64,7 @@
 | **EXP-0006** | **Walk-forward: validate ATR filter OOS** | **COMPLETED** | **CRITICAL** | **PASSED 3/4 folds — OOS avg +88% vs +49% baseline** |
 | EXP-0007 | Near-expiry AFTERNOON position sizing on ATR>30 | COMPLETED | HIGH | REJECTED — ATR filter absorbs near-expiry edge; inconsistent 3/6 months |
 | EXP-0008 | DTE bucket filtering and sizing within ATR>30 | COMPLETED | HIGH | REJECTED — DTE effects regime-conditional, not structural; DATA-001 blocked |
+| **EXP-0009** | **Multi-year ATR>30 validation (2023-2025, 36 months)** | **COMPLETED** | **CRITICAL** | **FAILED 56% (needed 65%) — fixed threshold doesn't generalize across regimes** |
 
 ---
 

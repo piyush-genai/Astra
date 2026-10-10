@@ -1,0 +1,59 @@
+{
+  "exp_id": "EXP-0009",
+  "hypothesis": "ATR>30 regime filter (validated OOS on 6-month 2026 data) holds across 3 years (Jan 2023-Dec 2025) and multiple market regimes.",
+  "status": "COMPLETED",
+  "created_at": "2026-10-10T23:00:00.000000",
+  "updated_at": "2026-10-10T23:30:00.000000",
+  "dataset_version": "nifty-5min-2023-2025 (DATA-001)",
+  "protocol": "Monthly walk-forward: each month tested independently with fixed ATR>30 threshold vs unfiltered baseline",
+  "pass_criterion": "ATR>30 beats baseline in >= 65% of months (23/36)",
+  "metrics": {
+    "months_tested": 36,
+    "atr30_beats_baseline": 20,
+    "win_rate_pct": 55.6,
+    "passed": false,
+    "overall_avg_baseline_return_pct": 20.9,
+    "overall_avg_atr30_return_pct": 31.1,
+    "avg_trades_baseline": 105,
+    "avg_trades_atr30": 14,
+    "avg_pnl_per_trade_atr30": 324,
+    "by_regime": {
+      "HIGH (avg ATR > 30)": {"months": 1, "wins": 0, "win_pct": 0, "avg_base": 165.4, "avg_filt": 77.0},
+      "MED (avg ATR 20-30)": {"months": 18, "wins": 11, "win_pct": 61, "avg_base": 30.7, "avg_filt": 55.0},
+      "LOW (avg ATR < 20)": {"months": 17, "wins": 9, "win_pct": 53, "avg_base": 2.1, "avg_filt": 3.1}
+    }
+  },
+  "findings": {
+    "FINDING-1": {
+      "title": "ATR>30 is RARE in 2023-2025 — only 1 of 36 months had avg monthly ATR > 30",
+      "detail": "March 2026 had avg 5-min ATR of 37.58 pts. In 36 months of 2023-2025, only June 2024 (ATR=34.4) exceeded 30. The ATR>30 filter was calibrated on an extreme outlier regime that almost never occurs historically. In most months, the filter triggers 0-14 trades vs 87-149 baseline trades.",
+      "implication": "A fixed ATR>30 threshold is not a general-purpose regime filter. It was a regime-specific gate that captured a single extreme volatility event."
+    },
+    "FINDING-2": {
+      "title": "In LOW-ATR months, 'beats baseline' often means 0 trades beat a losing baseline",
+      "detail": "9 of 17 LOW-regime wins are cases where ATR>30 gives 0 trades (return=0%) while baseline loses (-11% to -73%). These are not genuine wins — the filter avoids losing but also avoids all winners. When low-ATR months are strongly positive (2023-01: +117.6%, 2025-10: +101.3%), the filter badly underperforms.",
+      "implication": "The 'win' metric for 0-trade months is misleading. The filter should be evaluated only in months where it generates a meaningful number of trades."
+    },
+    "FINDING-3": {
+      "title": "Strategy baseline itself is much more volatile in 2023-2025 than 2026 backtest suggested",
+      "detail": "In 2023-2025: monthly baseline returns range from -73% to +202%. Many large losing months (Jan 2024: -69%, May 2024: -73%, Jul 2023: -49%). The 6-month Feb-Jul 2026 window was unusually favorable. The Oct-Nov-Dec 2024 period saw the filter AMPLIFY losses (ATR avg 25-29, triggering 36-40 trades/month, all net negative). The PivotCPR strategy loses money in sustained low-volatility trending markets.",
+      "implication": "The Feb-Jul 2026 backtest result was regime-specific. The strategy has a wider loss distribution than believed."
+    },
+    "FINDING-4": {
+      "title": "ATR filter performs best in MED-ATR regime (ATR avg 20-30) — 61% win rate",
+      "detail": "In MED months, ATR>30 filtered avg return is +55.0% vs +30.7% baseline (+24pp). Best filtered months: Apr 2025 (+284%), Aug 2024 (+184%), Jul 2024 (+141%), Feb 2024 (+134%). Worst: Oct 2024 (-48%), Dec 2024 (-34%), Jan 2024 (-29%). The MED regime is where filtering adds genuine value, but consistency is insufficient.",
+      "implication": "ATR>30 threshold works as intended in MED regime. But the current fixed threshold (30 pts) is calibrated to a regime that was historically rare."
+    },
+    "FINDING-5": {
+      "title": "A percentile-based ATR threshold would be more robust than a fixed value",
+      "detail": "If we define 'high ATR' as top 30th percentile of rolling 30-day ATR distribution (rather than fixed 30 pts), the threshold adapts to current market conditions. In 2023 (avg ATR ~13-18), the equivalent 'high' would be ATR>18-22. In March 2026 (avg ATR ~37), the threshold would be naturally higher. Fixed thresholds calibrated on one regime fail in others.",
+      "implication": "EXP-0010 should test rolling-percentile ATR filter (e.g., current ATR > 70th percentile of trailing 20-day ATR distribution)."
+    }
+  },
+  "conclusion": "HYPOTHESIS REJECTED. ATR>30 does NOT generalize to 56% of months across 2023-2025 (vs 65% required). The core reason: the threshold was calibrated on an extreme outlier regime (March 2026 avg ATR=37.58 pts) that occurs in only 1 of 36 historical months. In normal markets, ATR rarely exceeds 30, making the filter too restrictive to be useful. The MED-regime performance (61%) hints that the regime-filtering idea is sound, but the threshold must be relative to current market conditions, not absolute. CRITICAL FINDING: the PivotCPR strategy baseline shows much wider variance in 2023-2025 than the 6-month 2026 window suggested — several months saw -49% to -73% baseline returns. The strategy's edge is more fragile than the EXP-0001 baseline implied.",
+  "next_experiments": [
+    "EXP-0010: Adaptive ATR filter — current 5-min ATR > 70th percentile of trailing 20-trading-day ATR distribution. This adapts the threshold to the current volatility regime rather than using a fixed value.",
+    "EXP-0011: Baseline strategy performance deep-dive — why did 2023 H2 lose so badly? Is this a NIFTY bull-trend effect? Can it be filtered?",
+    "EXP-0012: Consider fundamentally different strategy parameters for 2023-2025 regime — the current parameters were implicitly optimized on 2026 data"
+  ]
+}
