@@ -1,0 +1,98 @@
+{
+  "exp_id": "EXP-0012",
+  "hypothesis": "The validated P70_L40d strategy, when stress-tested via 10,000 Monte Carlo simulations of bootstrapped trade outcomes, demonstrates acceptable risk-adjusted returns and drawdown characteristics for paper trading consideration.",
+  "status": "COMPLETED",
+  "created_at": "2026-10-11T00:30:00.000000",
+  "updated_at": "2026-10-11T01:00:00.000000",
+  "method": "Bootstrap resampling of 1,522 individual trade P&Ls from validated P70_L40d strategy (2023-2025). Each simulation draws 507 trades with replacement (1 year equivalent). 10,000 simulations. Note: individual trade P&Ls resampled — financial time series NOT shuffled.",
+  "trade_universe": {
+    "trades_collected": 1522,
+    "period": "Jan 2023 – Dec 2025 (36 months)",
+    "avg_trades_per_month": 42,
+    "avg_pnl_per_trade": 311,
+    "std_dev_per_trade": 2314,
+    "win_rate_pct": 30.0,
+    "avg_win": 2198,
+    "avg_loss": -498,
+    "win_loss_ratio": 4.41,
+    "best_trade": 31146,
+    "worst_trade": -6702
+  },
+  "monte_carlo_results": {
+    "n_simulations": 10000,
+    "trades_per_simulation": 507,
+    "initial_capital": 20000,
+    "annual_return_distribution": {
+      "p5_unlucky": 354.1,
+      "p25": 604.2,
+      "p50_median": 777.1,
+      "p75": 958.6,
+      "p95_lucky": 1234.9,
+      "mean": 780.1,
+      "std_dev": 279.3
+    },
+    "drawdown_distribution": {
+      "p50_median": 29.3,
+      "p75": 43.2,
+      "p95": 75.6,
+      "p99": 100.0
+    },
+    "risk_metrics": {
+      "prob_annual_loss_pct": 1.6,
+      "prob_ruin_dd50_pct": 17.8,
+      "prob_2x_capital_pct": 98.3,
+      "prob_3x_capital_pct": 97.9
+    },
+    "quality_metrics": {
+      "sharpe_ratio": 3.00,
+      "profit_factor": 1.89,
+      "expectancy_per_trade": 311
+    }
+  },
+  "gate_checks": {
+    "sharpe_gt_05": {"pass": true, "value": 3.00, "threshold": 0.5},
+    "ruin_prob_lt_20pct": {"pass": true, "value": 17.8, "threshold": 20.0},
+    "annual_loss_prob_lt_35pct": {"pass": true, "value": 1.6, "threshold": 35.0},
+    "overall_passed": true
+  },
+  "critical_caveats": {
+    "CAVEAT-1": {
+      "title": "95th percentile max drawdown is 75.6% — severe",
+      "detail": "In 5% of simulations the strategy loses 75.6%+ of capital before recovering. On ₹20,000, that means hitting ₹4,880 before recovering. Psychologically and practically this is very hard to survive. A trader at ₹20k who sees ₹15,000 disappear will almost certainly exit before the strategy recovers.",
+      "implication": "Minimum recommended capital for psychological and practical survival: ₹50,000–1,00,000. At ₹50k a 75% drawdown leaves ₹12,500 — still enough to maintain 1-lot positions."
+    },
+    "CAVEAT-2": {
+      "title": "30% win rate means long losing streaks are mathematically expected",
+      "detail": "With 30% win rate, the probability of 8 consecutive losses = 0.7^8 = 5.8%. In 507 trades/year, you will likely experience multiple 6-9 loss streaks. In live trading, this psychological pressure causes most traders to abandon a valid strategy.",
+      "implication": "Paper trading for 3+ months required to build confidence in the loss streaks before deploying real capital."
+    },
+    "CAVEAT-3": {
+      "title": "Returns are inflated by flat 14% IV assumption — real IV varies 10-35%",
+      "detail": "The options pricer uses 14% flat IV throughout. Real market IV on NIFTY weekly options varies from 10% (quiet markets) to 35%+ (crisis days). When you buy options in high-IV environments, you overpay for premium and the subsequent IV crush reduces your profits significantly. This single assumption likely inflates returns by 20-40%.",
+      "implication": "Real live returns will be lower than MC suggests. Treat headline returns with caution. Priority for next research phase: replace flat IV with real market IV data."
+    },
+    "CAVEAT-4": {
+      "title": "Returns are driven by a few large winning trades (right-skewed distribution)",
+      "detail": "Avg win ₹2,198, avg loss ₹498 (4.41x ratio). This means a small number of large winners drive the strategy's profitability. In a bootstrap, these large winners recur at their historical frequency. But in live trading, wide bid-ask spreads on NIFTY options can easily reduce a ₹2,198 winner to ₹1,500 while the ₹498 loser stays at ₹498 — significantly compressing the win/loss ratio.",
+      "implication": "Slippage and execution costs will impact large winning trades more than small losing trades. Real profit factor is likely 1.3-1.5 not 1.89."
+    },
+    "CAVEAT-5": {
+      "title": "Bootstrap samples from 3 years; if 2026+ market regime changes, results change",
+      "detail": "All 1,522 trades come from 2023-2025. If future market conditions are systematically different (structural ATR change, SEBI regulation change on weekly options), the trade distribution will be different from what we sampled.",
+      "implication": "The adaptive ATR filter partially addresses this (adapts to current volatility) but does not protect against structural regime shifts."
+    }
+  },
+  "minimum_capital_recommendation": {
+    "absolute_minimum": 20000,
+    "recommended": 50000,
+    "comfortable": 100000,
+    "rationale": "95th pctile max drawdown of 75.6% on ₹20k = account drops to ₹4,880. On ₹50k = drops to ₹12,200 (still enough for 2-3 lots). On ₹1L = drops to ₹24,400 (still 5+ lots). Minimum capital should allow the strategy to survive its worst-case drawdown and still trade."
+  },
+  "realistic_return_estimate": {
+    "backtest_median": "777%/year",
+    "realistic_after_caveats": "150-400%/year",
+    "rationale": "After accounting for real IV (not flat 14%), bid-ask spread on options (~₹2-5/unit = ₹100-250/lot), slippage on high-vol days, and psychological factors reducing trade count, realistic returns are a fraction of the backtest median. 200% annual return would still be extraordinary."
+  },
+  "conclusion": "HYPOTHESIS CONFIRMED — Monte Carlo gate PASSED on all 3 criteria. Sharpe 3.00, ruin probability 17.8% (<20%), annual loss probability 1.6% (<35%). The strategy shows strong statistical characteristics. HOWEVER: the 95th percentile drawdown (75.6%) and 30% win rate demand respect. The headline return of 777% median will compress significantly in live trading due to IV assumptions, slippage, and bid-ask spread on options. A realistic expectation is 150-400% annually at ₹50k capital with careful execution. The next gate is PAPER TRADING: 3 months of live signals (not deployed yet) to validate that the backtest signal logic matches real market microstructure.",
+  "next_gate": "PAPER_TRADING — wire the validated strategy to live data feed, generate signals, track paper P&L for minimum 3 months before real capital deployment"
+}

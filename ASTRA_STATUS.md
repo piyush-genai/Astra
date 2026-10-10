@@ -23,7 +23,14 @@
 
 **VALIDATED signal**: P70_L40d adaptive ATR filter (current ATR > 70th pctile of trailing 40-day ATR). Confirmed OOS: 67% (8/12 months 2025), avg +74.4%/month vs +56.3% baseline, ₹497/trade avg. Ready for Monte Carlo.
 
-**Phase gate**: WALK_FORWARD ✓ → MONTE_CARLO (next)
+**Phase gate**: WALK_FORWARD ✓ → MONTE_CARLO ✓ → PAPER_TRADING (next)
+
+**Monte Carlo summary** (10,000 sims, P70_L40d, ₹20k start):
+- Median annual return: +777% | 5th pctile: +354% | P(loss): 1.6%
+- Median max drawdown: 29.3% | 95th pctile drawdown: 75.6% (CAUTION)
+- Sharpe: 3.00 | Profit factor: 1.89 | Win rate: 30% (avg win 4.4x avg loss)
+- Realistic live return estimate: 150-400%/year (after IV, slippage, spread corrections)
+- Minimum recommended capital: ₹50,000
 
 ---
 
@@ -69,6 +76,7 @@
 | **EXP-0009** | **Multi-year ATR>30 validation (2023-2025, 36 months)** | **COMPLETED** | **CRITICAL** | **FAILED 56% (needed 65%) — fixed threshold doesn't generalize across regimes** |
 | **EXP-0010** | **Adaptive ATR percentile filter** | **COMPLETED** | **CRITICAL** | **ALL 6 configs PASS — best P70_L40d: 72% (26/36), avg +52.7%/mo (IN-SAMPLE)** |
 | **EXP-0011** | **Walk-forward: P70_L40d on 2025 OOS** | **COMPLETED** | **CRITICAL** | **PASSED 8/12 (67%) — OOS avg +74.4%/mo vs +56.3% baseline. VALIDATED.** |
+| **EXP-0012** | **Monte Carlo stress test (10,000 sims)** | **COMPLETED** | **CRITICAL** | **PASSED — Sharpe 3.00, P(ruin)=17.8%, P(loss)=1.6%. Next gate: PAPER** |
 
 ---
 
