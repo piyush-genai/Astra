@@ -1,26 +1,42 @@
-venv/
+# Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+.Python
 *.egg-info/
-.eggs/
 dist/
 build/
-*.so
+.eggs/
+venv/
+.venv/
+env/
 
-# Environment / secrets — never commit these
+# Environment
 .env
-*.pem
-*.key
-config/credentials.yaml
+.env.local
 
-# Test / coverage output
-.pytest_cache/
-.coverage
-htmlcov/
+# Trading state (runtime files — never commit live state)
+capital_state.json
+astra_state.db
+*.log
+TRADING_STATUS.txt
+
+# Data files (large — use git-lfs or exclude)
+data/live_data/*.csv
+data/backtest_results/*.csv
+paper_trades_*.csv
+
+# ML models (binary artifacts)
+ml/models/*.pkl
+ml/models/*.joblib
+ml/models/*.onnx
 
 # IDE
 .vscode/
 .idea/
+*.swp
 
-# macOS
+# OS
 .DS_Store
+Thumbs.db
