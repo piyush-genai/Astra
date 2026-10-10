@@ -21,7 +21,9 @@
 
 **Critical caveat**: Only 6 months of data; one clear high-vol cycle. Need 2023-2025 data before production confidence.
 
-**Current best config (in-sample, needs walk-forward)**: P70_L40d adaptive ATR filter — current ATR > 70th percentile of trailing 40-day ATR distribution. 26/36 months (72%), avg +52.7%/month vs +20.9% baseline. EXP-0011 walk-forward required before production consideration.
+**VALIDATED signal**: P70_L40d adaptive ATR filter (current ATR > 70th pctile of trailing 40-day ATR). Confirmed OOS: 67% (8/12 months 2025), avg +74.4%/month vs +56.3% baseline, ₹497/trade avg. Ready for Monte Carlo.
+
+**Phase gate**: WALK_FORWARD ✓ → MONTE_CARLO (next)
 
 ---
 
@@ -66,6 +68,7 @@
 | EXP-0008 | DTE bucket filtering and sizing within ATR>30 | COMPLETED | HIGH | REJECTED — DTE effects regime-conditional, not structural; DATA-001 blocked |
 | **EXP-0009** | **Multi-year ATR>30 validation (2023-2025, 36 months)** | **COMPLETED** | **CRITICAL** | **FAILED 56% (needed 65%) — fixed threshold doesn't generalize across regimes** |
 | **EXP-0010** | **Adaptive ATR percentile filter** | **COMPLETED** | **CRITICAL** | **ALL 6 configs PASS — best P70_L40d: 72% (26/36), avg +52.7%/mo (IN-SAMPLE)** |
+| **EXP-0011** | **Walk-forward: P70_L40d on 2025 OOS** | **COMPLETED** | **CRITICAL** | **PASSED 8/12 (67%) — OOS avg +74.4%/mo vs +56.3% baseline. VALIDATED.** |
 
 ---
 
