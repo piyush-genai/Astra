@@ -3,7 +3,8 @@ EXP-0001: Reproduce ATLAS baseline backtest using cached CSV data + current code
 No API calls needed — uses cached nifty_5min_20260201_to_20260731.csv.
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging
 import pandas as pd
@@ -24,7 +25,7 @@ strike_step = nifty_cfg["strike_step"]
 
 print("Loading cached 5-min NIFTY data...")
 df = pd.read_csv(
-    '/workshop/atlas/data/live_data/nifty_5min_20260201_to_20260731.csv',
+    'data/live_data/nifty_5min_20260201_to_20260731.csv',
     parse_dates=['timestamp'],
     index_col='timestamp',
 )
@@ -73,7 +74,7 @@ month_results = []
 
 for start_str, end_str in months:
     start = pd.Timestamp(start_str, tz="Asia/Kolkata")
-    end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(days=1)
+    end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(1, unit="D")
     month_data = df[(df.index >= start) & (df.index < end)]
 
     if month_data.empty:

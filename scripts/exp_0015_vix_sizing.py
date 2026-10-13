@@ -33,7 +33,8 @@ to trading variable lots. Appropriate for research; paper trading would
 use the same logic in real time.
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from pathlib import Path

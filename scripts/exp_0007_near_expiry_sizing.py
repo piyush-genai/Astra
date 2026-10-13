@@ -16,7 +16,8 @@ layer is an incremental adjustment; a separate OOS validation (EXP-0008)
 will be needed before production.
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from backtest.harness import BacktestHarness

@@ -4,7 +4,8 @@ Enter only: Monday (1 day before Tuesday expiry), AFTERNOON/CLOSING session (13:
 Tests whether the near-expiry gamma trade is a viable standalone sub-strategy.
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging
 import pandas as pd
@@ -63,7 +64,7 @@ for label, filt in [
 
     for start_str, end_str in months:
         start = pd.Timestamp(start_str, tz="Asia/Kolkata")
-        end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(days=1)
+        end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(1, unit="D")
         month_data = df[(df.index >= start) & (df.index < end)].copy()
 
         filtered = month_data[[filt(ts) for ts in month_data.index]]

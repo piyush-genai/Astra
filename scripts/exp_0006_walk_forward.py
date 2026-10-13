@@ -17,7 +17,8 @@ Pass criteria:
   ATR-filtered strategy outperforms unfiltered baseline in >= 3 of 4 test periods.
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from backtest.harness import BacktestHarness
@@ -112,14 +113,14 @@ def ts(date_str, tz="Asia/Kolkata"):
 
 # Walk-forward folds: (train_start, train_end, test_start, test_end, test_label)
 folds = [
-    (ts("2026-02-01"), ts("2026-03-31") + pd.Timedelta(days=1),
-     ts("2026-04-01"), ts("2026-04-30") + pd.Timedelta(days=1), "Apr"),
-    (ts("2026-02-01"), ts("2026-04-30") + pd.Timedelta(days=1),
-     ts("2026-05-01"), ts("2026-05-31") + pd.Timedelta(days=1), "May"),
-    (ts("2026-02-01"), ts("2026-05-31") + pd.Timedelta(days=1),
-     ts("2026-06-01"), ts("2026-06-30") + pd.Timedelta(days=1), "Jun"),
-    (ts("2026-02-01"), ts("2026-06-30") + pd.Timedelta(days=1),
-     ts("2026-07-01"), ts("2026-07-31") + pd.Timedelta(days=1), "Jul"),
+    (ts("2026-02-01"), ts("2026-03-31") + pd.Timedelta(1, unit="D"),
+     ts("2026-04-01"), ts("2026-04-30") + pd.Timedelta(1, unit="D"), "Apr"),
+    (ts("2026-02-01"), ts("2026-04-30") + pd.Timedelta(1, unit="D"),
+     ts("2026-05-01"), ts("2026-05-31") + pd.Timedelta(1, unit="D"), "May"),
+    (ts("2026-02-01"), ts("2026-05-31") + pd.Timedelta(1, unit="D"),
+     ts("2026-06-01"), ts("2026-06-30") + pd.Timedelta(1, unit="D"), "Jun"),
+    (ts("2026-02-01"), ts("2026-06-30") + pd.Timedelta(1, unit="D"),
+     ts("2026-07-01"), ts("2026-07-31") + pd.Timedelta(1, unit="D"), "Jul"),
 ]
 
 print("=" * 80)
@@ -134,7 +135,7 @@ for i, (train_start, train_end, test_start, test_end, test_label) in enumerate(f
     test_data  = df[(df.index >= test_start)  & (df.index < test_end)]
 
     print(f"{'─'*70}")
-    print(f"FOLD {i}: Train [{train_start.date()} → {(train_end - pd.Timedelta(days=1)).date()}]  |  Test [{test_label}]")
+    print(f"FOLD {i}: Train [{train_start.date()} → {(train_end - pd.Timedelta(1, unit="D")).date()}]  |  Test [{test_label}]")
     print(f"{'─'*70}")
 
     # ── STEP 1: Select best ATR threshold IN-SAMPLE ──────────────────────────

@@ -15,7 +15,8 @@ Usage:
     python3 scripts/data_001_fetch_historical.py --dry-run
 """
 import sys, os, time, argparse, calendar
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pathlib import Path
 from datetime import date, timedelta

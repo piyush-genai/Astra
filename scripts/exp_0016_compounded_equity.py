@@ -34,7 +34,8 @@ Slippage model:
   This is conservative — NIFTY ATM options usually have ₹1-2 spread.
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from pathlib import Path

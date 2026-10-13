@@ -25,7 +25,8 @@ Filter stacking: P70_L40d ATR filter FIRST, then VIX filter layered on top.
 Dataset: Jan 2023 – Dec 2025 (validated dataset).
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from pathlib import Path

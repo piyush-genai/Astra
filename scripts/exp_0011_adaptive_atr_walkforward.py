@@ -18,7 +18,8 @@ whether the chosen config still works when we restrict ourselves to 2025 only.
 Pass criterion: P70_L40d beats baseline in >= 65% of 2025 months (8 of 12).
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from pathlib import Path

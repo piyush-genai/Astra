@@ -20,7 +20,8 @@ Key questions answered:
   5. Is the strategy viable at ₹20,000 starting capital?
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from pathlib import Path

@@ -13,7 +13,8 @@ Protocol:
 Pass criterion: ATR>30 beats baseline in >= 65% of months (23 of 36).
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from pathlib import Path

@@ -3,7 +3,8 @@ EXP-0002: March 2026 forensic analysis.
 Runs the corrected backtest and captures detailed per-trade data for analysis.
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging
 import pandas as pd
@@ -61,7 +62,7 @@ stt_pct   = tx_costs.get("stt_options_pct", 0.15) / 100.0
 
 for start_str, end_str in months:
     start = pd.Timestamp(start_str, tz="Asia/Kolkata")
-    end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(days=1)
+    end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(1, unit="D")
     month_data = df[(df.index >= start) & (df.index < end)]
     if month_data.empty:
         continue

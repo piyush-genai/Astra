@@ -15,7 +15,8 @@ Tests:
   D. B+C combined:    ATR>30, no DTE=5, DTE=1 gets 2x lots
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from backtest.harness import BacktestHarness

@@ -3,7 +3,8 @@ EXP-0003: Range filter — trade only on days with prior-day range > 300 pts.
 No look-ahead: uses PRIOR day's range as proxy (available at session open).
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging
 import pandas as pd
@@ -77,7 +78,7 @@ for label, threshold in [("BASELINE (no filter)", None), (f"RANGE_FILTER (>{RANG
 
     for start_str, end_str in months:
         start = pd.Timestamp(start_str, tz="Asia/Kolkata")
-        end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(days=1)
+        end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(1, unit="D")
         month_data = df[(df.index >= start) & (df.index < end)].copy()
 
         if threshold is not None:
@@ -157,7 +158,7 @@ for label, r in results.items():
 print(f"\n── Days filtered out by range > {RANGE_THRESHOLD}pts ──")
 for start_str, end_str in months:
     start = pd.Timestamp(start_str, tz="Asia/Kolkata")
-    end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(days=1)
+    end   = pd.Timestamp(end_str, tz="Asia/Kolkata") + pd.Timedelta(1, unit="D")
     month_data = df[(df.index >= start) & (df.index < end)]
     trading_days = month_data.index.normalize().nunique()
     filtered_days = month_data[

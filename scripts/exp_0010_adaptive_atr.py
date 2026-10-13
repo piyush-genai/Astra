@@ -15,7 +15,8 @@ Tests: percentile thresholds [60, 65, 70, 75, 80] × lookback [20, 40, 60 days].
 Pass criterion: best config beats baseline in >= 65% of the 36 months.
 """
 import sys
-sys.path.insert(0, '/workshop/atlas')
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging, pandas as pd, numpy as np
 from pathlib import Path
