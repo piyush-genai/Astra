@@ -217,6 +217,13 @@ lot counts (0.35x at a base of 20 gives 7 lots, which only the cap-scaled form p
 - ₹20,000 start → ₹48,09,113 net (+23,946%)
 - ₹50,000 start → ₹49,20,067 net (+9,740%)
 
+**⚠️ These figures describe a configuration that has never been permitted to run** (EXP-0020).
+They assume 30% capital deployment and lot caps growing to 35, while `config/risk.yaml`
+permits 25% and `hard_cap_lots: 10`. Under the limits as configured the three-year result is
+**₹28,23,528 from ₹50k** — 42.6% lower. The entire gap is the 10-lot cap; the 25% deployment
+limit costs nothing. A staged 35-lot ceiling returns ₹41,55,673 at 23.7% max drawdown versus
+the validated config's 31.9%. See DECISION-010 for the pending limit decision.
+
 **Path to ₹15-20 crore:**
 - Requires starting capital ₹5-10 lakh OR ₹50k + 3 years of reinvestment + lot cap of 100+
 - ₹15 crore from ₹50k requires ~180x return, achievable in theory at 50+ lots over 3 years

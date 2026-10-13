@@ -1,0 +1,81 @@
+{
+  "exp_id": "EXP-0020",
+  "hypothesis": "The validated EXP-0017 sizing (30% deployment, 20-35 lots) is illegal under config/risk.yaml (25%, hard_cap_lots 10), so the ₹49.2L projection does not describe the system as configured. Measuring the permitted limits directly will show what compliance actually costs, which constraint causes it, and whether a staged path to higher limits recovers most of the outcome — a better basis for a risk-limit decision than raising limits to match a backtest.",
+  "status": "COMPLETED",
+  "created_at": "2026-10-13T20:30:00.000000",
+  "updated_at": "2026-10-13T21:00:00.000000",
+  "git_commit": "e5b38c6",
+  "strategy": "pivot_cpr_strategy",
+  "dataset_version": "nifty-5min-2023-2025 sha256 830bd8bb6f70d1b4… + india_vix_daily-2023-2025 sha256 ddb209c300682272… (CHECKSUMS.json)",
+  "train_range": ["2023-01-02", "2025-12-31"],
+  "test_range": ["2023-01-02", "2025-12-31"],
+  "motivation": "DECISION-010. This experiment changes no risk limits and touches no execution path — it measures what the existing configured limits produce. The alternative on the table was to raise the limits so the backtest remains quotable, which is the failure mode AGENTS.md section 14 names explicitly.",
+  "method": "EXP-0017's method: collect the 1,522 one-lot trades once (P70_L40d + VIX×1.1 IV + VIX tilt), then replay under seven sizing configurations, all using the D_steps 4-tier drawdown multiplier, 30% monthly tax reserve and the slippage model. The 'validated' arm is a control that must reproduce EXP-0017 exactly, and does, at both start capitals.",
+  "harness_validation": {
+    "control_arm": "EXP-0017 validated (30%, 20 lots, uncapped)",
+    "expected_50k": 4920067,
+    "reproduced_50k": 4920067,
+    "expected_20k": 4809113,
+    "reproduced_20k": 4809113,
+    "note": "The control initially matched at ₹50k but came out 0.67% low at ₹20k. The cause was an ordering bug in this script, found by insisting the control match rather than by accepting a close number: the HWM was being marked after each trade's P&L instead of before it, which captures the last trade of each month as a peak that month-end withholding then undercuts, deepening every tier by a notch. It shifted 2023-03 from 0.65x to 0.35x. After correcting the order to match exp_0017 line 201, both start capitals reproduce exactly and the monthly log matches line for line."
+  },
+  "metrics": {
+    "start_50k": {
+      "validated_30pct_20lots_uncapped":   {"net_after_tax": 4920067, "return_pct": 9740, "max_dd_pct": 31.9, "months_reduced": "16/34", "peak_lots": 35},
+      "compliant_25pct_10lots_hard":       {"net_after_tax": 2823528, "return_pct": 5547, "max_dd_pct": 23.7, "months_reduced": "13/34", "peak_lots": 10, "compliant": true},
+      "isolate_deploy_25pct_20lots":       {"net_after_tax": 4937019, "return_pct": 9774, "max_dd_pct": 32.0, "months_reduced": "16/34", "peak_lots": 35},
+      "isolate_lotcap_30pct_10lots_hard":  {"net_after_tax": 2822968, "return_pct": 5546, "max_dd_pct": 24.5, "months_reduced": "13/34", "peak_lots": 10},
+      "staged_shadow_25pct_20lots_hard":   {"net_after_tax": 3946180, "return_pct": 7792, "max_dd_pct": 23.7, "months_reduced": "14/34", "peak_lots": 20},
+      "staged_live_25pct_35lots_hard":     {"net_after_tax": 4155673, "return_pct": 8211, "max_dd_pct": 23.7, "months_reduced": "14/34", "peak_lots": 30},
+      "hwm_artifact_removed":              {"net_after_tax": 6536373, "return_pct": 12973, "max_dd_pct": 46.2, "months_reduced": "9/34", "peak_lots": 45}
+    },
+    "start_20k": {
+      "validated_30pct_20lots_uncapped":   {"net_after_tax": 4809113, "return_pct": 23946, "max_dd_pct": 30.5, "months_reduced": "17/34", "peak_lots": 35},
+      "compliant_25pct_10lots_hard":       {"net_after_tax": 2800845, "return_pct": 13904, "max_dd_pct": 25.0, "months_reduced": "13/34", "peak_lots": 10, "compliant": true},
+      "isolate_deploy_25pct_20lots":       {"net_after_tax": 4799293, "return_pct": 23896, "max_dd_pct": 30.2, "months_reduced": "16/34", "peak_lots": 35},
+      "isolate_lotcap_30pct_10lots_hard":  {"net_after_tax": 2801822, "return_pct": 13909, "max_dd_pct": 24.9, "months_reduced": "13/34", "peak_lots": 10},
+      "staged_shadow_25pct_20lots_hard":   {"net_after_tax": 3922528, "return_pct": 19513, "max_dd_pct": 25.0, "months_reduced": "14/34", "peak_lots": 20},
+      "staged_live_25pct_35lots_hard":     {"net_after_tax": 4132021, "return_pct": 20560, "max_dd_pct": 25.0, "months_reduced": "14/34", "peak_lots": 30},
+      "hwm_artifact_removed":              {"net_after_tax": 6500328, "return_pct": 32402, "max_dd_pct": 45.7, "months_reduced": "9/34", "peak_lots": 45}
+    },
+    "compliance_cost_pct_of_validated": {"50k": 42.6, "20k": 41.8}
+  },
+  "findings": {
+    "FINDING-1": {
+      "title": "The 25% deployment limit costs nothing — the entire compliance cost is hard_cap_lots",
+      "detail": "Relaxing only the lot cap (25% deployment, 20 lots growing uncapped) yields ₹4,937,019 at ₹50k, marginally ABOVE the validated ₹4,920,067 at 30%. Relaxing only the deployment limit (30% deployment, 10-lot hard cap) yields ₹2,822,968 — essentially identical to full compliance at ₹2,823,528. So the 30% vs 25% question is immaterial and the 10-lot hard cap accounts for the whole 42.6% shortfall. The DECISION-010 conflict is really one constraint, not two, and 25% is not a concession worth negotiating over.",
+      "confidence": "HIGH — two isolating arms, consistent at both start capitals"
+    },
+    "FINDING-2": {
+      "title": "A staged path recovers most of the outcome at materially lower drawdown",
+      "detail": "At ₹50k: 20-lot ceiling gives ₹3,946,180 (80% of validated) and 35-lot gives ₹4,155,673 (84%), both at 23.7% max drawdown versus the validated config's 31.9%. The staged-live arm is therefore better risk-adjusted than the validated config itself — 84% of the return for three-quarters of the drawdown — because capping lots removes the largest positions, which carry both the biggest slippage penalty and the biggest drawdown contribution. Full compliance at 10 lots gives 57% of the return at 23.7% drawdown, so the incremental risk from 10 → 35 lots is nil on this metric while the return rises 47%.",
+      "confidence": "MEDIUM-HIGH — directionally robust, but G1 applies: above ~15-20 lots per-lot P&L is assumed size-independent, which flatters the high-lot arms"
+    },
+    "FINDING-3": {
+      "title": "The tax-withholding HWM artifact is an accidental risk brake, not simply lost return",
+      "detail": "Removing the artifact (marking the HWM only post-withholding) raises the validated outcome from ₹4,920,067 to ₹6,536,373, +32.9%, and cuts reduced months from 16/34 to 9/34. But max drawdown rises from 31.9% to 46.2% — about 14 percentage points. So the artifact is not leaving money on the table for free: it is behaving as an unintended drawdown control, and removing it is a return-for-risk trade rather than a pure improvement. My earlier framing in DECISION-009 ('may be leaving return on the table') was incomplete and is corrected here.",
+      "confidence": "HIGH for the direction and rough magnitude; the exact drawdown figures depend on the monthly-series definition of max DD used here"
+    },
+    "FINDING-4": {
+      "title": "Three divergences between the documented engine and the implemented one",
+      "detail": "Building a faithful harness surfaced three places where src/astra/risk/lot_manager.py did not match exp_0017, all now corrected: (a) the drawdown multiplier scales the lot cap, not the capital term (already DECISION-008); (b) the HWM is marked immediately before sizing, not after the trade's P&L — worth ~0.7% over three years; (c) a profitable month increments the lot-cap growth streak ONLY at the 1.00x tier, so profitable months during a drawdown neither increment nor reset it and nothing is 'banked' to spend on recovery. Point (c) contradicts the natural reading of the documented rule and had been implemented the intuitive way.",
+      "confidence": "HIGH — each read from exp_0017 source and pinned by a regression test"
+    }
+  },
+  "conclusion": "HYPOTHESIS CONFIRMED, with a materially better answer than expected. Compliance with config/risk.yaml as written costs 42.6% of the validated outcome (₹49.2L → ₹28.2L at a ₹50k start), but the cost is attributable entirely to hard_cap_lots: 10; the 25% deployment limit costs nothing and may even help. A staged ceiling recovers 80-84% of the outcome at 23.7% max drawdown against the validated config's 31.9%, which makes the staged path better risk-adjusted than the design it is a concession from. The recommendation to DECISION-010 is therefore: adopt 25% deployment permanently rather than seeking 30%, and treat hard_cap_lots as the single staged parameter — 10 for paper, then 20, then 35, each step earned by validated behaviour rather than granted to match a backtest. This remains a human risk-limit decision under AGENTS.md section 6. Separately, the ₹49.2L figure should stop being quoted as the system's expected outcome: it describes a configuration that has never been permitted to run.",
+  "leakage_checked": false,
+  "walk_forward_done": false,
+  "monte_carlo_done": false,
+  "caveats": [
+    "CAVEAT-1: G1 applies throughout. This is a post-hoc replay of 1,522 one-lot trades, assuming per-lot P&L is independent of position size. Arms peaking at 30-45 lots are directional only. The bias favours high-lot arms, so it understates the case for compliance and overstates FINDING-2's upper end.",
+    "CAVEAT-2: Max drawdown is computed from the month-end net-capital series, which is not the definition EXP-0017 reported (it records 44.1% for the validated config where this reports 31.9%). Comparisons BETWEEN arms here are valid since all use one definition; comparisons against EXP-0017's published drawdown figures are not.",
+    "CAVEAT-3: Single historical path, 2023-2025. No walk-forward or Monte Carlo was run on these sizing variants, so the staged-path conclusion in FINDING-2 is one realisation and not a distribution. A Monte Carlo over the sizing arms would be the natural follow-up before any limit change.",
+    "CAVEAT-4: hard_cap_lots also encodes an exchange constraint — config/risk.yaml carries a standing instruction to verify the NIFTY freeze quantity via Upstox's option contract API before trusting the number. Staging to 20 or 35 lots may be blocked by the freeze quantity regardless of risk appetite. Unverified here."
+  ],
+  "next_steps": [
+    "Human decision on DECISION-010 using FINDING-1 and FINDING-2: recommended is 25% deployment permanently, with hard_cap_lots staged 10 → 20 → 35 across paper → shadow → live.",
+    "Verify the NIFTY per-order freeze quantity via Upstox before assuming any staged lot ceiling above 10 is even executable (CAVEAT-4).",
+    "EXP-0021 (PROPOSED): Monte Carlo the sizing arms, so the staged-path recommendation rests on a distribution rather than one historical path.",
+    "DECISION-009 should be updated with FINDING-3: the HWM artifact is a risk brake, so 'fixing' it is a trade, not a correction."
+  ]
+}

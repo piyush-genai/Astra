@@ -237,6 +237,16 @@ class LotManager:
 
     # ── sizing ───────────────────────────────────────────────────────────────────────
 
+    def mark_hwm(self) -> None:
+        """
+        Re-mark the high-water mark against current net capital.
+
+        Called automatically by lots_for() under PER_TRADE marking, and by close_month()
+        in every mode. Exposed publicly because the *timing* of this call changes results:
+        see the comment in lots_for().
+        """
+        self._hwm = max(self._hwm, self.net_capital)
+
     def lots_for(self, premium_per_lot: float) -> int:
         """
         Lot count for one trade at the given premium.
@@ -246,6 +256,15 @@ class LotManager:
         """
         if premium_per_lot <= 0:
             raise ValueError(f"premium_per_lot must be positive, got {premium_per_lot}")
+
+        # Mark the HWM immediately BEFORE sizing, which is what exp_0017's trade loop does
+        # (`if net_cap > hwm: hwm = net_cap` precedes the dd computation). The ordering is
+        # load-bearing, not incidental: marking after the trade's P&L instead captures the
+        # last trade of each month as a peak that month-end withholding then undercuts,
+        # deepening every drawdown tier by a notch. Verified against EXP-0017 — the wrong
+        # ordering shifts 2023-03 from 0.65x to 0.35x and costs ~0.7% over three years.
+        if self.config.hwm_marking is HwmMarking.PER_TRADE:
+            self.mark_hwm()
 
         # Floor the premium so a deep-OTM quote cannot inflate the lot count (HANDOFF G2).
         premium = max(premium_per_lot, self.config.premium_floor_per_lot)
@@ -263,18 +282,17 @@ class LotManager:
         """
         Apply one closed trade's P&L.
 
-        Drawdown responds immediately — net capital moves with every trade — but the HWM
-        itself only re-marks here under HwmMarking.PER_TRADE. Note RISK-8: drawdown
-        *within* an open position is still invisible, so a fast adverse move can breach a
-        tier boundary without the lot count reacting until the position closes.
+        Drawdown responds immediately, since net capital moves with every trade. The HWM
+        is deliberately NOT re-marked here — lots_for() marks it before sizing instead,
+        for the ordering reason documented there. Note RISK-8: drawdown *within* an open
+        position is still invisible, so a fast adverse move can breach a tier boundary
+        without the lot count reacting until the position closes.
         """
         self.gross_capital += pnl
         self._month_pnl += pnl
         # Capital floor mirrors the EXP-0016/0017 simulations, which clamped at ₹500 to
         # keep a wiped account from producing nonsense lot counts.
         self.gross_capital = max(self.gross_capital, 500.0)
-        if self.config.hwm_marking is HwmMarking.PER_TRADE:
-            self._hwm = max(self._hwm, self.net_capital)
 
     def close_month(self) -> dict[str, Any]:
         """
@@ -290,9 +308,6 @@ class LotManager:
         if month_pnl > 0:
             tax_withheld = month_pnl * (self.config.tax_rate_pct / 100.0)
             self.tax_reserve += tax_withheld
-            self._consecutive_profitable_months += 1
-        else:
-            self._consecutive_profitable_months = 0
 
         # Re-mark the HWM on post-withholding net capital, matching the order in
         # exp_0016_compounded_equity.py: the peak is updated first, then the tier is
@@ -300,11 +315,17 @@ class LotManager:
         # month that sets a new high is still judged against the stale peak.
         self._hwm = max(self._hwm, self.net_capital)
 
+        # Streak semantics follow exp_0017 exactly: a profitable month counts ONLY while at
+        # the 1.00x tier. A profitable month taken at a reduced tier neither increments nor
+        # resets it — so no streak accrues during a drawdown recovery and there is nothing
+        # "banked" to spend on the way out. A losing month always resets.
+        if month_pnl > 0 and self.at_full_tier:
+            self._consecutive_profitable_months += 1
+        elif month_pnl <= 0:
+            self._consecutive_profitable_months = 0
+
         grew = False
-        if (
-            self._consecutive_profitable_months >= self.config.consec_months_for_step
-            and self.at_full_tier
-        ):
+        if self._consecutive_profitable_months >= self.config.consec_months_for_step:
             proposed = self._max_lots_cap + self.config.lot_step
             if self.config.hard_cap_lots is not None:
                 proposed = min(proposed, self.config.hard_cap_lots)

@@ -221,10 +221,23 @@ module exists to prevent. But the finding is significant on its own terms: the v
 was achieved *despite* spending much of 2023-24 artificially throttled, which means the design
 may be leaving return on the table rather than earning it.
 
-**Proposed follow-up (EXP-0020)**: re-run EXP-0017's D_steps with `MONTH_CLOSE` marking, or
-with the tax reserve accrued per trade so net capital is always post-tax, and measure the
-difference. If material, the compounding engine's drawdown response needs redesigning before
-paper trading, not after. This is a sizing change and so needs approval under AGENTS.md §13.
+**MEASURED 2026-10-13 (EXP-0020 FINDING-3) — and my framing above was wrong.** Removing the
+artifact raises the ₹50k outcome from ₹49,20,067 to ₹65,36,373 (+32.9%) and cuts reduced
+months from 16/34 to 9/34 — but max drawdown rises from 31.9% to **46.2%**, about 14
+percentage points.
+
+So the artifact is not "leaving return on the table". It is functioning as an *unintended
+drawdown brake*, and removing it is a return-for-risk trade, not a correction. Keep
+`PER_TRADE` as the default on that basis as well as on faithfulness grounds. If the artifact
+is ever removed deliberately, it should be replaced by an explicit risk control rather than
+simply deleted, and that is a risk-limit change under AGENTS.md §6.
+
+**Correction to this entry's own history**: a third divergence turned up while building the
+EXP-0020 harness. `lot_manager.py` had been incrementing the lot-cap growth streak on any
+profitable month; exp_0017 increments it **only at the 1.00x tier**, so profitable months
+during a drawdown neither increment nor reset it and nothing accrues to spend on recovery.
+Fixed, with a regression test. The documented rule ("+5 every 3 consecutive profitable months
+AT the 1.00x tier") reads as though a streak banks during drawdown. It does not.
 
 **Review trigger**: Before TASK-1 paper wiring. RISK-8 (no intra-position drawdown tracking)
 is separate and still open.
@@ -255,6 +268,34 @@ configured, and raising limits to match a backtest — rather than raising them 
 validated behaviour earned it — is the failure mode AGENTS.md section 14 warns about. Note
 `hard_cap_lots` also carries a standing instruction to verify the NIFTY freeze quantity via
 Upstox before trusting it.
+
+**MEASURED 2026-10-13 (EXP-0020)** — (b) was carried out. The decision is still the human's,
+but it is now an informed one, and the shape of it changed:
+
+| Config | Net (₹50k start) | Max DD | vs validated |
+|---|---|---|---|
+| Validated (30%, 20→35 lots) | ₹49,20,067 | 31.9% | — |
+| **Compliant as written (25%, 10 lots)** | **₹28,23,528** | **23.7%** | −42.6% |
+| 25% deployment, lots uncapped | ₹49,37,019 | 32.0% | **+0.3%** |
+| 30% deployment, 10-lot cap | ₹28,22,968 | 24.5% | −42.6% |
+| Staged: 25%, 20-lot ceiling | ₹39,46,180 | 23.7% | −19.8% |
+| Staged: 25%, 35-lot ceiling | ₹41,55,673 | 23.7% | −15.6% |
+
+**The 25% deployment limit costs nothing** — it is marginally better than 30%. The entire
+42.6% shortfall is `hard_cap_lots: 10`. So this was never a two-parameter conflict.
+
+**Revised recommendation**: adopt 25% deployment permanently and stop treating it as a
+concession. Treat `hard_cap_lots` as the single staged parameter: 10 (paper) → 20 (shadow) →
+35 (live), each step earned by validated behaviour. The 35-lot ceiling returns 84% of the
+validated outcome at 23.7% max drawdown versus 31.9% — better risk-adjusted than the design
+it concedes from, so there is no case for ever raising deployment to 30%.
+
+**Also**: stop quoting ₹49.2L as the expected outcome. It describes a configuration that has
+never been permitted to run. Under the compliant config the three-year figure is ₹28.2L.
+
+**Blocked on**: verifying the NIFTY per-order freeze quantity via Upstox before assuming a
+20- or 35-lot ceiling is executable at all (EXP-0020 CAVEAT-4). And G1 still applies: the
+high-lot arms are directional, which flatters them.
 
 **Impact until resolved**: `LotManagerConfig.from_risk_config()` raises `RiskLimitConflict`
 rather than clamping, so this conflict surfaces at construction instead of silently halving

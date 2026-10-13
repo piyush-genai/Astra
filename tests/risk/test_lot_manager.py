@@ -89,38 +89,57 @@ def test_tax_withholding_does_not_create_a_drawdown() -> None:
     assert mgr.dd_multiplier == 1.00
 
 
+def _trade(mgr: LotManager, pnl: float, premium: float = 5_000.0) -> int:
+    """
+    One full trade cycle in the order the validated engine uses: size first (which marks
+    the HWM under PER_TRADE), then book the P&L. Tests must go through this rather than
+    calling record_trade_pnl() alone, or the HWM never advances.
+    """
+    lots = mgr.lots_for(premium)
+    mgr.record_trade_pnl(pnl)
+    return lots
+
+
 def test_per_trade_marking_demotes_a_tier_after_a_strong_month() -> None:
     """
-    Pins the artifact present in the validated EXP-0017 run, which marks per trade (now
-    the default). A month earning 100% of capital withholds 30% of the new peak at close
-    and demotes the engine on accounting alone, with no actual loss having occurred.
-    Confirmed in the reproduced monthly log: 2023-05 posts +Rs 509,869 and sits at 0.35x.
+    The tax artifact present in the validated EXP-0017 run. The HWM is marked before each
+    trade's P&L, so by month end it sits just below the month's true peak; withholding 30%
+    of the month's profit then opens a drawdown that never happened.
+
+    It bites once a month earns roughly its own capital or more — exactly the regime
+    2023-03 (+₹116,587, demoted to 0.65x) and 2023-05 (+₹509,869, demoted to 0.35x) were in.
     """
     mgr = LotManager(gross_capital=100_000.0)
-    mgr.record_trade_pnl(100_000.0)  # HWM marked at 200,000 pre-tax
-    assert mgr.high_water_mark == pytest.approx(200_000.0)
+    for _ in range(20):
+        _trade(mgr, 10_000.0)  # +₹200,000 on ₹100,000 of capital
+    mgr.close_month()
 
-    mgr.close_month()  # withholds 30,000
-    assert mgr.net_capital == pytest.approx(170_000.0)
-    assert mgr.drawdown == pytest.approx(0.15)
-    assert mgr.dd_multiplier == 0.65  # demoted despite a doubling month
+    assert mgr.tax_reserve == pytest.approx(60_000.0)
+    assert mgr.drawdown > 0.15      # demoted...
+    assert mgr.dd_multiplier == 0.65
+    assert mgr.net_capital > 100_000.0  # ...despite tripling capital
 
-    # MONTH_CLOSE marking does not do this.
+    # MONTH_CLOSE marking, which only ever marks post-withholding, does not do this.
     alt = LotManager(config=LotManagerConfig(hwm_marking=HwmMarking.MONTH_CLOSE),
                      gross_capital=100_000.0)
-    alt.record_trade_pnl(100_000.0)
+    for _ in range(20):
+        _trade(alt, 10_000.0)
     alt.close_month()
     assert alt.drawdown == 0.0
     assert alt.dd_multiplier == 1.00
 
 
 def test_hwm_only_ever_rises() -> None:
+    """The HWM lags one trade, since it is marked before each trade's P&L is booked."""
     mgr = LotManager(gross_capital=20_000.0)
-    mgr.record_trade_pnl(5_000.0)
-    peak = mgr.high_water_mark
-    assert peak == pytest.approx(25_000.0)
+    _trade(mgr, 5_000.0)
+    assert mgr.high_water_mark == pytest.approx(20_000.0)  # marked pre-P&L
 
-    mgr.record_trade_pnl(-8_000.0)
+    _trade(mgr, 0.0)
+    peak = mgr.high_water_mark
+    assert peak == pytest.approx(25_000.0)  # now caught up
+
+    _trade(mgr, -8_000.0)
     assert mgr.high_water_mark == pytest.approx(peak)
     assert mgr.drawdown == pytest.approx(8_000.0 / 25_000.0)
 
@@ -264,69 +283,62 @@ def test_losing_month_resets_the_streak() -> None:
 
 def test_cap_does_not_grow_while_in_drawdown() -> None:
     """
-    The gate that matters: three profitable months during a recovery must not enlarge the
+    The gate that matters: profitable months taken during a recovery must not enlarge the
     cap while the strategy is still impaired.
     """
     mgr = LotManager(config=LotManagerConfig(initial_max_lots=20), gross_capital=1_000_000.0)
-    mgr.record_trade_pnl(0.0)
-    mgr.record_trade_pnl(-500_000.0)  # 50% drawdown → crisis tier
+    _trade(mgr, -500_000.0)  # 50% drawdown → crisis tier
     mgr.close_month()
     assert mgr.dd_multiplier == 0.12
 
-    # Three profitable months that are too small to climb out of the drawdown.
+    # Three profitable months too small to climb out of the drawdown.
     for _ in range(3):
-        mgr.record_trade_pnl(1_000.0)
+        _trade(mgr, 1_000.0)
         mgr.close_month()
 
     assert mgr.drawdown >= 0.15
     assert not mgr.at_full_tier
     assert mgr.max_lots_cap == 20  # held
-    assert mgr.consecutive_profitable_months >= 3  # streak preserved, not spent
 
 
-def _in_drawdown_with_banked_streak() -> LotManager:
-    """₹1M account driven to a 50% drawdown, then three small profitable months."""
+def test_profitable_months_at_reduced_tier_do_not_accrue_a_streak() -> None:
+    """
+    exp_0017 counts a profitable month ONLY at the 1.00x tier: `if month_pnl > 0 and not
+    reduced`. A profitable month at a reduced tier neither increments nor resets the
+    streak, so nothing accumulates during a drawdown and there is nothing banked to spend
+    on the way out. Pinned because the natural reading of the documented rule ("+5 every
+    3 consecutive profitable months AT the 1.00x tier") suggests banking, and it does not.
+    """
     mgr = LotManager(config=LotManagerConfig(initial_max_lots=20), gross_capital=1_000_000.0)
-    mgr.record_trade_pnl(-500_000.0)
+    _trade(mgr, -500_000.0)
     mgr.close_month()
-    for _ in range(3):
-        mgr.record_trade_pnl(1_000.0)
+    assert not mgr.at_full_tier
+
+    for _ in range(5):
+        _trade(mgr, 1_000.0)
         mgr.close_month()
-    assert mgr.max_lots_cap == 20  # streak banked, cap held
-    return mgr
 
-
-def test_one_big_recovery_month_does_not_spend_the_streak() -> None:
-    """
-    The artifact's practical consequence, and the reason the default matters. A month that
-    recovers the whole drawdown withholds 30% of its own profit at close, which re-opens a
-    drawdown against the peak just set mid-month. So the engine is NOT at 1.00x, and the
-    banked streak cannot be spent — the cap stays put despite four profitable months.
-    """
-    mgr = _in_drawdown_with_banked_streak()
-    mgr.record_trade_pnl(1_000_000.0)  # sets a new high mid-month
-    mgr.close_month()                  # ...then withholds ₹300,000 of it
-
-    assert mgr.drawdown == pytest.approx(0.20, abs=0.01)
-    assert not mgr.at_full_tier
+    assert mgr.consecutive_profitable_months == 0  # nothing accrued
     assert mgr.max_lots_cap == 20
-    assert mgr.consecutive_profitable_months == 4  # banked, not spent
 
 
-def test_streak_is_spent_once_the_tier_genuinely_recovers() -> None:
-    """
-    A second profitable month small enough that its withholding stays under the 15% tier
-    boundary does reach 1.00x, and the banked streak then applies.
-    """
-    mgr = _in_drawdown_with_banked_streak()
-    mgr.record_trade_pnl(1_000_000.0)
+def test_cap_grows_after_three_profitable_months_at_full_tier() -> None:
+    """Recovery to 1.00x restarts the count from zero; three clean months then grow it."""
+    mgr = LotManager(config=LotManagerConfig(initial_max_lots=20), gross_capital=1_000_000.0)
+    _trade(mgr, -500_000.0)
     mgr.close_month()
-    assert not mgr.at_full_tier
 
-    mgr.record_trade_pnl(400_000.0)
+    _trade(mgr, 2_000_000.0)  # decisive recovery to a new high
     mgr.close_month()
     assert mgr.at_full_tier
-    assert mgr.max_lots_cap == 25
+    assert mgr.max_lots_cap == 20  # first clean month only
+
+    for _ in range(2):
+        _trade(mgr, 10_000.0)
+        mgr.close_month()
+    assert mgr.at_full_tier
+    assert mgr.max_lots_cap == 25  # three clean months → +5
+
 
 
 # ── sizing arithmetic ────────────────────────────────────────────────────────────────
