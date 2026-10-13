@@ -1,0 +1,16 @@
+[Unit]
+Description=ASTRA paper trading timer (weekdays 09:15 IST = 03:45 UTC)
+
+[Timer]
+# The box runs UTC. 03:45 UTC = 09:15 IST = NSE open.
+OnCalendar=Mon-Fri *-*-* 03:45:00
+
+# MUST stay false. With Persistent=true, systemd fires a missed run the moment the
+# timer starts or the box boots — which on 2026-10-13 launched a "trading session"
+# at 03:00 IST, six hours before the open. A market-hours job must never catch up.
+Persistent=false
+
+Unit=astra-paper.service
+
+[Install]
+WantedBy=timers.target

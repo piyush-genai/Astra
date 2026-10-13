@@ -1,0 +1,28 @@
+[Unit]
+Description=ASTRA paper trading session
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/atlas
+
+# No ExecStartPre=git pull on purpose. A transient pull failure would abort the
+# session silently, and auto-deploying unreviewed code into a path that sizes
+# positions is the wrong default. Pull deliberately, then restart the timer.
+ExecStart=/home/ubuntu/atlas/venv/bin/python3 scripts/run_paper_astra.py --capital 50000 --duration 380
+
+# 09:15 + 380 min = 15:35 IST, just past the 15:30 close. The engine closes any
+# open position in its finally block, so a few idle minutes at the end are safe.
+
+StandardOutput=append:/home/ubuntu/atlas/logs/astra-paper.log
+StandardError=append:/home/ubuntu/atlas/logs/astra-paper.log
+
+# Warmup fetches ~3,900 bars over four API calls before the loop starts.
+TimeoutStartSec=0
+Restart=no
+
+# No [Install] section: this unit is started by astra-paper.timer, never enabled
+# directly. `systemctl status` showing "disabled" is correct for a timer-activated
+# service and is not a fault.
