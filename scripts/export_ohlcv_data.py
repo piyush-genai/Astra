@@ -59,7 +59,7 @@ def main():
             next_month = first_day.replace(year=first_day.year + 1, month=1)
         else:
             next_month = first_day.replace(month=first_day.month + 1)
-        last_day = next_month - pd.Timedelta(days=1)
+        last_day = next_month - pd.Timedelta(1, unit="D")
         
         # Constrain to requested range
         month_start = max(first_day, from_dt).strftime("%Y-%m-%d")

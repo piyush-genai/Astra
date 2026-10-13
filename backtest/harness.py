@@ -347,7 +347,7 @@ class BacktestHarness:
                     in_cooldown = (
                         last_exit_zone == zone_key 
                         and last_exit_time is not None
-                        and (bar_time - last_exit_time) < pd.Timedelta(minutes=self._cooldown_minutes)
+                        and (bar_time - last_exit_time) < pd.Timedelta(self._cooldown_minutes, unit="m")
                     )
                     if in_cooldown:
                         can_enter = False
@@ -447,7 +447,7 @@ class BacktestHarness:
                     }
                     if suppress_reason == "cooldown" and last_exit_time:
                         supp_record["cooldown_ends"] = str(
-                            last_exit_time + pd.Timedelta(minutes=self._cooldown_minutes)
+                            last_exit_time + pd.Timedelta(self._cooldown_minutes, unit="m")
                         )
                     if suppress_reason == "position_active" and entry_time:
                         supp_record["active_since"] = str(entry_time)
