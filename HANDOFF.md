@@ -66,15 +66,32 @@ through EXP-0017 have not been re-verified across that boundary because their da
 
 ### Required environment variables (names only — never commit values)
 
+**Corrected 2026-10-13.** The list previously given here named variables that no Python file
+reads (`UPSTOX_API_KEY`, `UPSTOX_API_SECRET`, `UPSTOX_REDIRECT_URI`) and pointed at
+`scripts/auth_upstox.py`, which does not exist — the script is `scripts/auth.py`. Copy
+`.env.example` instead; it is generated from the actual source and annotates which script
+consumes each name.
+
 ```
-UPSTOX_API_KEY          # Upstox API credentials
-UPSTOX_API_SECRET
-UPSTOX_REDIRECT_URI
-UPSTOX_ACCESS_TOKEN     # refreshed daily; see scripts/auth_upstox.py
-ALGO_ID                 # SEBI mandatory Algo-ID (required from April 2026)
+UPSTOX_ANALYTICS_TOKEN       # scripts/data_001_fetch_historical.py — rebuilds the 2023-2025 CSV
+UPSTOX_LIVE_API_KEY          # scripts/auth.py OAuth flow
+UPSTOX_LIVE_API_SECRET
+UPSTOX_LIVE_REDIRECT_URI
+UPSTOX_ACCESS_TOKEN          # refreshed daily by scripts/auth.py
+UPSTOX_SANDBOX_API_KEY       # scripts/run_backtest.py, export_ohlcv_data.py, test_sandbox.py
+UPSTOX_SANDBOX_API_SECRET
+UPSTOX_SANDBOX_REDIRECT_URI
+UPSTOX_SANDBOX_ACCESS_TOKEN
+TELEGRAM_BOT_TOKEN           # scripts/telegram_bot.py, live/monitor.py
+TELEGRAM_CHAT_ID
 ```
 
-These are loaded from `.env` (gitignored). See `core/config_loader.py` for how they are consumed.
+`ALGO_ID` is **not** an environment variable — nothing reads it. The SEBI Algo-ID belongs in
+`config/risk.yaml` under `algo_ids:`, where `pivot_cpr_strategy` is still `null`. Setting an
+`ALGO_ID` env var would give no compliance whatsoever; see RISK-4.
+
+These are loaded from `.env` (gitignored) by each script's own `load_env()`, not by
+`core/config_loader.py` — that module reads only the YAML in `config/`.
 
 ### Required local data files (gitignored — not in repo)
 
