@@ -342,7 +342,25 @@ Expected: two files, ~100MB and ~50KB respectively.
 
 ## 8. Next 5 Tasks
 
-**TASK-1 (PAPER-001)**: Wire the full validated strategy stack to paper trading mode.
+**TASK-1 (PAPER-001)**: ~~Wire the full validated strategy stack to paper trading mode.~~
+**BUILT 2026-10-13.** `scripts/run_paper_astra.py` exists and passes preflight against the
+live Upstox API (3,900 warmup bars, VIX resolved, sizing dry-check OK). See DECISION-012.
+
+It subclasses the tested `PaperTradingEngine` rather than reimplementing it, adding the
+regime gate (`src/astra/alpha/regime_filter.py`), the VIX tilt
+(`src/astra/risk/vix_sizing.py`) and the step-down lot engine. Runs at `config/risk.yaml` as
+written — 25% deployment, 10-lot cap — so no risk-limit change was needed.
+
+`python3 scripts/run_paper_astra.py --preflight` runs every readiness check without trading.
+
+Two things to know before reading results:
+- The regime filter **refuses to trade until 3,000 bars of warmup** exist (~40 sessions).
+  Without the window there is no P70 threshold, so the runner aborts rather than trade blind.
+- At ₹20k-50k capital the engine sizes **1 lot per trade**, so the tiers and VIX tilt are
+  effectively inert. The metric that matters now is realised ₹/trade vs the backtest's
+  ₹307/lot.
+
+Original task description follows.
 
 Implement in `scripts/run_paper_astra.py`:
 - Load P70_L40d ATR regime filter

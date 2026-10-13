@@ -40,3 +40,8 @@ ml/models/*.onnx
 # OS
 .DS_Store
 Thumbs.db
+
+# ASTRA paper trading runtime state (never commit live state)
+astra_paper_state.db
+astra_sizing_state.json
+paper_state.db

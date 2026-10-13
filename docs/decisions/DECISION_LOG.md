@@ -360,6 +360,53 @@ paper and live configs coexist and sharing one file becomes actively dangerous.
 
 ---
 
+## DECISION-012 — 2026-10-13: Lot Manager Activated for Paper Trading Only
+
+**Context**: DECISION-007 built the lot manager and deliberately left it unwired, stating
+that activation would be a separate explicit decision. The operator has asked to begin paper
+trading, which is that decision.
+
+**Decision**: `src/astra/risk/lot_manager.py` is now wired into
+`scripts/run_paper_astra.py` — and **only** there. `scripts/run_live.py` and
+`live/orchestrator.py` remain untouched. No real order path can reach it.
+
+**Scope of what was activated**:
+- P70_L40d adaptive ATR regime gate (`src/astra/alpha/regime_filter.py`, EXP-0010/0011)
+- VIX bucket size tilt (`src/astra/risk/vix_sizing.py`, EXP-0015)
+- Step-down 4-tier lot engine with cap growth (EXP-0017)
+- Running at `config/risk.yaml` as written: 25% deployment, `hard_cap_lots: 10`
+
+**Not activated**: the VIX×1.1 IV model (EXP-0014). Paper trading fetches real option quotes
+from the broker, so the session *tests* the IV model rather than depending on it. That is a
+large part of the point of paper trading.
+
+**Rationale**: No risk limit was changed, so this needs no section 6 decision. Paper mode
+places no real orders, so it is not the live execution path of section 13. The sizing engine
+is exercised inside a simulator against real market data, which is exactly the validation
+step the gate sequence calls for before SHADOW.
+
+**Two deliberate deviations from the research, both fail-safe**:
+1. **VIX fallback.** The research used `except: pctile = 50.0` on a VIX lookup failure — and
+   50.0 is the bottom edge of the sweet spot, so that fallback sizes **up** to 1.5x. Harmless
+   with a complete backtest file; the wrong direction on a live feed hiccup. An unresolvable
+   VIX now returns None and sizes 1.0x. No recorded result is affected, because the research
+   scripts compute their percentiles inline and do not import this module.
+2. **Integer lots.** The research applied the VIX multiplier to per-lot P&L, equivalent to
+   trading `lots × mult` with no rounding. Live lots are integral, so the multiplier
+   truncates — at 1-2 lots a 1.5x tilt rounds away entirely. This biases toward smaller
+   positions, the safe direction.
+
+**Impact / what this session actually measures**: at ₹20,000-50,000 with 25% deployment and
+~₹6,500 average premium per lot, the engine sizes **1 lot per trade**. The step-down tiers and
+the VIX tilt are therefore close to inert for the first months — they only bite at larger
+capital. The number worth measuring is **realised ₹/trade against the backtest's ₹307/lot**.
+The lot-scaling machinery is wired and tested but will not be meaningfully exercised yet.
+
+**Review trigger**: After 3 paper months, or before any SHADOW transition. Wiring into
+`run_live.py` remains a separate decision and is NOT covered by this entry.
+
+---
+
 ## Template for future decisions
 
 ```
