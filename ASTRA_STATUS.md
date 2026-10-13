@@ -178,23 +178,21 @@ side of the line, as does the unresolved 6x conflict in EXP-0016.
 **Starting capital**: ₹20,000–₹50,000  
 **Current approach**: Compound capital — reinvest profits into more lots as capital grows
 
-**⚠️ DISPUTED — DO NOT CITE (flagged 2026-10-13).** The table below is attributed to EXP-0016
-but contradicts the EXP-0016 result recorded on line 89 of this same file (₹50k → ₹10 lakh
-after tax) by roughly 6x, and lists a ₹20k/50-lot scenario where the committed script
-`scripts/exp_0016_compounded_equity.py` defines ₹20k/25-lot. Its tax and slippage columns are
-round approximations rather than computed outputs, unlike every other recorded result, which
-suggests it predates the drawdown-brake and tax-reserve logic and may describe an earlier run
-such as `scripts/run_compounding_backtest.py`. That is an unconfirmed guess.
+**❌ REFUTED AND REPLACED (2026-10-13, EXP-0019 FINDING-1).** The table formerly here claimed
+₹88,48,311 gross / ~₹60 lakh after tax for the ₹50k scenario, and listed a ₹20k/50-lot case.
+EXP-0016 was re-run against the restored, checksummed dataset and **neither holds**. The real
+figures, reproduced from `scripts/exp_0016_compounded_equity.py`:
 
-The 2023-2025 CSVs are absent from the repo (RISK-0), so neither figure can currently be
-re-derived. Use the EXP-0017 step-down numbers below instead — those have a committed record.
-Resolution requires re-running the script and filing a new experiment ID.
+| Start | Lot cap | 3-yr gross | Tax reserve | **Net after tax** | Return |
+|---|---|---|---|---|---|
+| ₹20,000 | 10 lots | ₹10,40,333 | ₹4,51,597 | **₹5,88,737** | +2,844% |
+| ₹50,000 | 20 lots | ₹16,24,817 | ₹6,20,639 | **₹10,04,178** | +1,908% |
+| ₹20,000 | 25 lots | ₹16,90,238 | ₹6,75,556 | **₹10,14,682** | +4,973% |
 
-| Start | Lot cap | 3-yr end (GROSS) | After 30% tax | After slippage |
-|---|---|---|---|---|
-| ₹20,000 | 10 lots | ₹44,12,853 | ~₹30 lakh | ~₹20-25 lakh |
-| ₹50,000 | 20 lots | ₹88,48,311 | ~₹60 lakh | ~₹40-50 lakh |
-| ₹20,000 | 50 lots | ₹2,15,70,418 | ~₹1.5 crore | ~₹80 lakh |
+So the ₹50k scenario yields ~₹10 lakh, confirming line 89 of this file, and the old table
+overstated it by about 6x. The third scenario is 25 lots, not 50 — there is no 50-lot run.
+These are the **cliff-brake** figures; EXP-0017's step-down design supersedes them, which is
+why its ₹49.2L result is the one to cite.
 
 **The compounding engine (how lots scale with capital) — Step-down 4-tier (validated EXP-0017):**
 ```
@@ -204,9 +202,15 @@ dd_mult      = 1.00 if dd < 0.15        ← normal, full operation
              = 0.65 if 0.15 ≤ dd < 0.25 ← caution
              = 0.35 if 0.25 ≤ dd < 0.40 ← defense
              = 0.12 if dd ≥ 0.40         ← crisis minimum
-lots         = min(floor(net_capital × 0.30 / premium_per_lot × dd_mult), max_lots_cap)
+effective_cap = max(1, floor(max_lots_cap × dd_mult))  ← dd_mult scales the CAP, not capital
+lots          = min(max(1, floor(net_capital × 0.30 / premium_per_lot)), effective_cap)
 max_lots_cap = 10 (paper) / 20 (live); +5 every 3 profitable months AT dd_mult=1.00
 tax_reserve  = 30% of each month's net profit withheld (not available for sizing)
+```
+Corrected 2026-10-13 (DECISION-008, EXP-0019 FINDING-2). The previous form applied dd_mult to
+the capital term; that clamps to the unscaled cap and cannot reproduce EXP-0017's own recorded
+lot counts (0.35x at a base of 20 gives 7 lots, which only the cap-scaled form produces).
+```
 ```
 
 **Compounded projection (after 30% tax, slippage, step-down brake, 3 years 2023-2025):**

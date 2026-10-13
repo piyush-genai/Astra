@@ -67,24 +67,28 @@ class HwmMarking(str, Enum):
     """
     When the high-water mark is re-marked.
 
-    MONTH_CLOSE reproduces what EXP-0016/0017 actually simulated: the brake compared
-    `capital - tax_reserve` against the peak only inside close_month(), i.e. after that
-    month's tax was withheld.
+    PER_TRADE is the default because it is what `exp_0017_drawdown_management.py` — the
+    script that produced the validated ₹49.2L result — actually does: it re-marks the peak
+    inside the trade loop (`if net_cap > hwm: hwm = net_cap`), as well as at month close.
+    EXP-0016 re-marked only at month close; EXP-0017 changed this, and EXP-0017 is the run
+    the production recommendation rests on.
 
-    PER_TRADE is what EXP-0017.json's recommended_production_design asks for ("updated
-    after every trade (intraday), not monthly ... gives faster recovery recognition").
-    That recommendation was never simulated, and adopting it introduces an artifact: the
-    HWM gets marked on pre-withholding capital mid-month, then month-end tax withholding
-    drops net capital below it, so a strongly profitable month demotes the engine a tier
-    for purely accounting reasons. A month earning 50% of capital withholds 15% of it,
-    which is exactly the 1.00x → 0.65x boundary.
+    This carries a real artifact, verified in the reproduced EXP-0017 monthly log. The HWM
+    is marked on capital that has not yet had that month's tax withheld; at month close 30%
+    of the month's profit moves to the tax reserve, net capital drops below the peak, and
+    the engine registers a drawdown it never actually suffered. In the validated run,
+    2023-03 posts +₹116,587 and sits at 0.65x; 2023-05 posts +₹509,869 and sits at 0.35x.
+    Strongly profitable months demote the engine for purely accounting reasons, which is
+    why 16 of 34 months are in reduced mode.
 
-    MONTH_CLOSE is therefore the default. Do not switch to PER_TRADE without re-running
-    EXP-0017 to quantify the demotion.
+    So the ₹49.2L result was achieved *despite* spending much of 2023-24 artificially
+    throttled. Correcting it may well improve the outcome — but that is a new experiment,
+    not a silent default change, because the projections on record assume this behaviour.
+    MONTH_CLOSE is retained to run that comparison. See DECISION-009.
     """
 
-    MONTH_CLOSE = "month_close"
     PER_TRADE = "per_trade"
+    MONTH_CLOSE = "month_close"
 
 
 # Step-down 4-tier table from EXP-0017 config D_steps, as (drawdown_below, lot_multiplier).
@@ -111,7 +115,7 @@ class LotManagerConfig:
     max_capital_deployed_pct: float | None = None  # ceiling from risk.yaml
     tiers: tuple[tuple[float, float], ...] = STEP_DOWN_TIERS
     dd_application: DrawdownApplication = DrawdownApplication.CAP_SCALED
-    hwm_marking: HwmMarking = HwmMarking.MONTH_CLOSE
+    hwm_marking: HwmMarking = HwmMarking.PER_TRADE
 
     def __post_init__(self) -> None:
         if self.tiers[-1][0] != math.inf:

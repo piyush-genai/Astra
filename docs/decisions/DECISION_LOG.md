@@ -137,9 +137,21 @@ new decision entry here.
 
 ---
 
-## DECISION-008 — 2026-10-13: Drawdown Multiplier Scales the Lot Cap (PROPOSED)
+## DECISION-008 — 2026-10-13: Drawdown Multiplier Scales the Lot Cap (**CONFIRMED**)
 
-**Status**: PROPOSED — needs human confirmation, ideally by re-running EXP-0017.
+**Status**: CONFIRMED later the same day by re-running EXP-0017 against the restored dataset
+and reading the sizing code directly. The inference below was correct. The actual lines are:
+
+```python
+eff_max       = max(1, int(base_max_lots * mult))                      # cap is scaled
+lots_from_cap = max(1, int(net_cap * RISK_PER_TRADE / prem_per_lot))
+lots          = min(lots_from_cap, eff_max)
+```
+
+The reproduced D_steps monthly log confirms the effective caps at a base of 20: 1.00x → 20,
+0.65x → 13, 0.35x → 7, 0.12x → 2. `lot_manager.py`'s `CAP_SCALED` default is therefore
+faithful to the validated run, and **all three documented formulas are wrong** and should be
+corrected to the form above.
 
 **Context**: The sizing formula is written three times in the docs, and all three forms apply
 the drawdown multiplier to the capital term:
@@ -171,33 +183,51 @@ authoritative on the formula.
 
 ---
 
-## DECISION-009 — 2026-10-13: HWM Marked at Month Close, Not Per Trade (PROPOSED)
+## DECISION-009 — 2026-10-13: HWM Marked Per Trade, and It Carries a Real Tax Artifact (**REVISED**)
 
-**Status**: PROPOSED — contradicts EXP-0017.json's written recommendation.
+**Status**: REVISED the same day. My first version of this entry was wrong, and the correction
+matters more than the original claim.
 
-**Context**: `EXP-0017.json` recommends "hwm_tracking: Updated after every trade (intraday),
-not monthly. Gives faster recovery recognition." But `exp_0016_compounded_equity.py` — the
-code that actually produced the results — updates the peak only inside `close_month()`, after
-that month's tax has been withheld. The recommendation was never simulated.
+**What I got wrong**: I read `exp_0016_compounded_equity.py`, saw the peak updated only inside
+`close_month()`, and concluded that EXP-0017.json's "updated after every trade" recommendation
+had never been simulated. I set `MONTH_CLOSE` as the default on that basis. But EXP-0017 is a
+*different script*, and it marks per trade — `if net_cap > hwm: hwm = net_cap`, inside the
+trade loop (line 201). EXP-0016 marks at month close; EXP-0017 changed it. EXP-0017 is the run
+the ₹49.2L projection and the production recommendation rest on, so `PER_TRADE` is the faithful
+default. Corrected.
 
-Adopting it introduces an artifact. The HWM gets marked on pre-withholding capital mid-month;
-at close, 30% of the month's profit is withheld, dropping net capital below that peak. A month
-earning 50% of capital withholds 15% of it — exactly the 1.00x → 0.65x boundary. A strongly
-profitable month would demote the engine a tier with no loss having occurred.
+**What survived the correction**: the tax artifact is real — and it is present in the validated
+results, not avoided by them. The HWM is marked on capital that has not yet had the month's tax
+withheld; at close, 30% of the month's profit moves to the reserve, net capital falls below the
+peak, and the engine registers a drawdown it never suffered. The reproduced D_steps monthly log
+shows this plainly:
 
-**Decision (proposed)**: Mark the HWM at month close on post-withholding net capital
-(`HwmMarking.MONTH_CLOSE`, the default), reproducing the validated simulation. `PER_TRADE` is
-retained and documented, but must not be enabled without re-running EXP-0017 to quantify the
-demotion.
+| Month | Month P&L | Drawdown | Tier | Max lots |
+|---|---|---|---|---|
+| 2023-03 | **+₹116,587** | 24.8% | 0.65x | 13 |
+| 2023-05 | **+₹509,869** | 31.3% | 0.35x | 7 |
 
-**Rationale**: Faithfulness to the run that produced the numbers outranks an unsimulated
-improvement, especially one that silently reduces exposure after good months. Drawdown still
-responds per trade; only the peak is month-stable.
+Both are strongly profitable months spent in reduced exposure. This is a large part of why 16
+of 34 months are flagged "reduced". A unit test pins the practical consequence: a month that
+recovers an entire drawdown still cannot spend a banked lot-cap-growth streak, because its own
+withholding re-opens a drawdown against the peak it just set.
 
-**Impact**: Recovery recognition is slower than EXP-0017 recommended. RISK-8 (no intra-position
-drawdown tracking) is unchanged and still open.
+**Decision**: Default to `PER_TRADE`, matching the validated run exactly. Do **not** "fix" the
+artifact by default. `MONTH_CLOSE` is retained to run the comparison.
 
-**Review trigger**: Re-run of EXP-0017; or the first paper month showing an unexpected tier change.
+**Rationale**: The ₹49.2L figure was produced by a system behaving this way, so changing it
+silently would make paper results incomparable to the backtest — the specific failure this
+module exists to prevent. But the finding is significant on its own terms: the validated result
+was achieved *despite* spending much of 2023-24 artificially throttled, which means the design
+may be leaving return on the table rather than earning it.
+
+**Proposed follow-up (EXP-0020)**: re-run EXP-0017's D_steps with `MONTH_CLOSE` marking, or
+with the tax reserve accrued per trade so net capital is always post-tax, and measure the
+difference. If material, the compounding engine's drawdown response needs redesigning before
+paper trading, not after. This is a sizing change and so needs approval under AGENTS.md §13.
+
+**Review trigger**: Before TASK-1 paper wiring. RISK-8 (no intra-position drawdown tracking)
+is separate and still open.
 
 ---
 

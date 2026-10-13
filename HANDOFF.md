@@ -36,9 +36,11 @@ dd_mult      = 1.00 if dd < 0.15
              = 0.65 if 0.15 ≤ dd < 0.25
              = 0.35 if 0.25 ≤ dd < 0.40
              = 0.12 if dd ≥ 0.40
-lots         = min(floor(net_capital × 0.30 / premium_per_lot × dd_mult), max_lots_cap)
+effective_cap = max(1, floor(max_lots_cap × dd_mult))     ← dd_mult scales the CAP
+lots          = min(max(1, floor(net_capital × 0.30 / premium_per_lot)), effective_cap)
 max_lots_cap starts 10 (paper) / 20 (live); +5 every 3 consecutive profitable months AT dd_mult=1.00 tier only
 tax_reserve  = 30% of each profitable month's P&L withheld (NOT available for lot sizing)
+hwm          = re-marked per closed trade on net capital (pre-withholding — see DECISION-009)
 ```
 
 **3-year backtest result (after 30% tax + slippage, 2023-2025):**
@@ -229,11 +231,13 @@ sessions), passes all 11 checks in `verify_data.py`, and is checksummed in
 `data/live_data/CHECKSUMS.json`. EXP-0009/0010/0011/0012 were re-run and **reproduce exactly**
 — see EXP-0018. The validated regime filter P70_L40d is auditable from a clean clone again.
 
-**India VIX: still absent.** `india_vix_daily_20230101_to_20251231.csv` has no fetcher in the
-repo and must be sourced manually (columns `date,vix`, ~740 rows). Until it exists,
-**EXP-0013 through EXP-0017 cannot be run** — that is the VIX×1.1 IV model, VIX tilt sizing,
-the compounding engine, and the step-down drawdown tiers. The ₹49.2L projection and the
-EXP-0016 results conflict both sit on that side of the line.
+**India VIX: also resolved.** It never needed a manual download. Upstox serves it under
+`NSE_INDEX|India VIX`, and `scripts/data_002_fetch_vix.py` (DATA-002) now fetches the whole
+range in one call — 744 rows, matching the NIFTY dataset's 744 sessions, cross-check passing.
+
+**RISK-0 is closed.** Both datasets are fetchable by committed scripts, verified, and
+checksummed. All of EXP-0009 through EXP-0017 were re-run and reproduce exactly (EXP-0018,
+EXP-0019). The research core is reproducible from a clean clone for the first time.
 
 **RISK-1: Strategy degradation in live conditions (unquantified)**  
 Backtest covers 2023-2025. Future market structure may differ (option market depth, new participants, VIX regime). Historical performance is not a guarantee. Minimum 3 months paper trading before any live capital. No model accounts for this.
@@ -276,9 +280,12 @@ after tax; the ASTRA_STATUS.md capital-goal table says ₹88,48,311 gross / ~₹
 for the same scenario. The scenario lists disagree too — the committed script defines ₹20k at
 25 lots, the table lists ₹20k at 50 lots.
 
-**Do not quote any EXP-0016 capital figure until the script is re-run.** The qualitative
-cliff-brake finding is unaffected and is corroborated by both sources. See the
-`results_conflict` block in EXP-0016.json.
+**RESOLVED the same day (EXP-0019 FINDING-1).** The script was re-run against the restored
+dataset. The ₹50k / 20-lot scenario yields **₹10,04,178 net after tax** — so the ₹10 lakh
+figure is correct and the ASTRA_STATUS capital-goal table overstated it ~6x. That table has
+been replaced with the reproduced numbers. The third scenario is ₹20k/25-lot (₹10,14,682);
+there is no 50-lot run. EXP-0016.json's `results_conflict` block is retained as the record of
+how the discrepancy was found, with a pointer to the resolution.
 
 ### MEDIUM
 

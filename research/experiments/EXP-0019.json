@@ -1,0 +1,80 @@
+{
+  "exp_id": "EXP-0019",
+  "hypothesis": "With the India VIX dataset restored, EXP-0013 through EXP-0017 also reproduce exactly, completing the audit begun in EXP-0018 and resolving the two questions that could not be settled without the data: the 6x conflict in EXP-0016's recorded results, and whether the step-down drawdown multiplier scales the lot cap or the capital term.",
+  "status": "COMPLETED",
+  "created_at": "2026-10-13T19:40:00.000000",
+  "updated_at": "2026-10-13T20:10:00.000000",
+  "git_commit": "e743fc3",
+  "strategy": "pivot_cpr_strategy",
+  "dataset_version": "nifty-5min-2023-2025 sha256 830bd8bb6f70d1b4… + india_vix_daily-2023-2025 sha256 ddb209c300682272…, both re-fetched 2026-10-13 and recorded in data/live_data/CHECKSUMS.json",
+  "train_range": ["2023-01-02", "2025-12-31"],
+  "test_range": ["2023-01-02", "2025-12-31"],
+  "method": "The India VIX file was believed to require a manual NSE download; it is in fact available from the Upstox Analytics API under instrument key 'NSE_INDEX|India VIX' and is now fetched by scripts/data_002_fetch_vix.py. 744 rows, matching the NIFTY dataset's 744 trading sessions exactly, with verify_data.py's VIX-covers-NIFTY cross-check passing. All five VIX-dependent experiments were then re-run and compared against their committed records.",
+  "metrics": {
+    "experiments_rerun": 5,
+    "experiments_reproduced_exactly": 5,
+    "cumulative_with_EXP_0018": "9 of 9 experiments EXP-0009..EXP-0017 reproduce exactly",
+    "EXP-0013": {
+      "recorded": {"sweet_50_60_avg_pnl": 547, "danger_60_75_avg_pnl": 47},
+      "reproduced": {"sweet_50_60_avg_pnl": 547, "danger_60_75_avg_pnl": 47, "sweet_trades": 126, "danger_trades": 216},
+      "match": "EXACT"
+    },
+    "EXP-0014": {
+      "recorded": {"vix_1_1_pnl_delta_pct": -6.9, "vix_1_1_sharpe": 2.87},
+      "reproduced": {"flat_14_total": 473571, "vix_1_1_total": 440879, "vix_1_1_pnl_delta_pct": -7, "vix_1_1_sharpe": 2.87, "flat_sharpe": 3.00, "vix_1_0_delta_pct": -2, "vix_1_2_delta_pct": -11},
+      "match": "EXACT"
+    },
+    "EXP-0015": {
+      "recorded": {"tilt_sharpe": 2.93, "tilt_pnl_lift_pct": 6, "tilt_max_dd_pct": 33.7, "gradient_lift_pct": 15.6},
+      "reproduced": {"baseline_sharpe": 2.87, "baseline_max_dd_pct": 39.4, "tilt_sharpe": 2.93, "tilt_pnl_lift_pct": 6.0, "tilt_max_dd_pct": 33.7, "gradient_lift_pct": 15.6, "aggressive_lift_pct": 12.5, "configs_passed": "4/4"},
+      "match": "EXACT"
+    },
+    "EXP-0016": {
+      "reproduced": {"20k_10lot_net_after_tax": 588737, "50k_20lot_net_after_tax": 1004178, "20k_25lot_net_after_tax": 1014682},
+      "match": "RESOLVES THE CONFLICT — see FINDING-1"
+    },
+    "EXP-0017": {
+      "recorded_50k": {"A_cliff": 2865464, "B_linear": 4011415, "C_quadratic": 4230132, "D_steps": 4920067, "E_sigmoid": 3950207, "D_steps_months_reduced": "16/34"},
+      "reproduced_50k": {"A_cliff": 2865464, "B_linear": 4011415, "C_quadratic": 4230132, "D_steps": 4920067, "E_sigmoid": 3950207, "D_steps_months_reduced": "16/34"},
+      "reproduced_20k": {"A_cliff": 1829138, "B_linear": 3866606, "C_quadratic": 4069564, "D_steps": 4809113, "E_sigmoid": 3914132},
+      "match": "EXACT — all 10 config × start-capital combinations"
+    }
+  },
+  "findings": {
+    "FINDING-1": {
+      "title": "The EXP-0016 6x conflict is resolved: ₹10 lakh is correct, the ASTRA_STATUS table is wrong",
+      "detail": "EXP-0016 reproduces at ₹1,004,178 net after tax for the ₹50k / 20-lot scenario — approximately ₹10 lakh. This confirms the figure recorded in HANDOFF.md and ASTRA_STATUS.md line 89, and refutes the ASTRA_STATUS.md capital-goal table, which claimed ₹88,48,311 gross / ~₹60 lakh after tax for the same scenario. The table's scenario list is also wrong: the script's third scenario is ₹20k at 25 lots (reproducing at ₹1,014,682), not ₹20k at 50 lots. The reconstructed EXP-0016.json recorded both claims without choosing between them; this experiment chooses.",
+      "confidence": "HIGH — reproduced from the committed script against checksummed data"
+    },
+    "FINDING-2": {
+      "title": "The drawdown multiplier scales the lot cap, not the capital term — all three documents are wrong",
+      "detail": "Confirmed by reading exp_0017_drawdown_management.py directly: `eff_max = max(1, int(base_max_lots * mult))`, then `lots = min(lots_from_cap, eff_max)`. The reproduced D_steps monthly log confirms the effective caps at a base of 20: 1.00x→20, 0.65x→13, 0.35x→7, 0.12x→2. CLAUDE.md, HANDOFF.md and ASTRA_STATUS.md all write the multiplier against the capital term, a form which clamps to the unscaled cap and cannot produce the 7-lot figure EXP-0017 itself records. All three have been corrected. See DECISION-008.",
+      "confidence": "HIGH — read from source and confirmed against reproduced output"
+    },
+    "FINDING-3": {
+      "title": "The validated compounding engine spends profitable months artificially throttled",
+      "detail": "EXP-0017 marks the high-water mark per trade on capital that has not yet had the month's tax withheld. At month close 30% of the month's profit moves to the tax reserve, net capital falls below that peak, and the engine registers a drawdown it never suffered. The reproduced D_steps log shows 2023-03 posting +₹116,587 while sitting at the 0.65x tier, and 2023-05 posting +₹509,869 while sitting at the 0.35x defense tier with a cap of 7 lots. This mechanism accounts for much of the '16 of 34 months in reduced mode' figure. The ₹49.2L result was therefore achieved despite the engine being throttled through most of 2023-24, not because the throttling helped.",
+      "confidence": "HIGH — mechanism read from source, effect visible in the reproduced monthly log",
+      "implication": "Proposed EXP-0020 should quantify the cost by re-running D_steps with month-close HWM marking, or with the tax reserve accrued per trade so net capital is always post-tax. If material, the drawdown response needs redesigning before paper trading. This is a position-sizing change and requires approval under AGENTS.md section 13."
+    },
+    "FINDING-4": {
+      "title": "The India VIX file never needed to be sourced manually",
+      "detail": "HANDOFF.md section 7 listed it as an NSE download with no fetcher in the repo, which is why EXP-0013..0017 had been unreproducible. Upstox serves it under 'NSE_INDEX|India VIX' — the only accepted spelling, as INDIA VIX, India Vix and INDIAVIX all return 400 Invalid Instrument key. The whole 3-year range returns in one daily-interval call, since the 30-day limit applies only to intraday intervals. DATA-002 now automates it.",
+      "confidence": "HIGH"
+    }
+  },
+  "conclusion": "HYPOTHESIS CONFIRMED. All five VIX-dependent experiments reproduce exactly, bringing the audit to 9 of 9 for EXP-0009 through EXP-0017. Both 2023-2025 datasets are now fetchable from Upstox by committed scripts, verified by 11 integrity checks plus a cross-dataset alignment check, and checksummed. RISK-0 is fully resolved and RISK-6 is resolved in favour of the ₹10 lakh figure. The research core of ASTRA is reproducible from a clean clone for the first time. Two substantive findings came out of the audit rather than the reproduction: the sizing formula in every document is wrong (FINDING-2, now corrected), and the validated compounding engine throttles itself after profitable months through a tax-withholding artifact (FINDING-3, which is a live design question, not a documentation one). Reproducibility remains distinct from validity: these experiments reproduce their own numbers, which says nothing about the open risk-limit conflict in DECISION-010, the post-hoc sizing assumption in G1, or the multiple-testing exposure that EXP-0010's own record flags.",
+  "leakage_checked": false,
+  "walk_forward_done": true,
+  "monte_carlo_done": true,
+  "caveats": [
+    "CAVEAT-1: Equivalence of the re-fetched datasets is inferred from identical results, not proven by hash; the originals were never hashed. Nine experiments matching across every sub-figure makes a material difference very unlikely.",
+    "CAVEAT-2: This audit re-ran experiments; it did not re-audit methodology. G1 (post-hoc sizing replay assumes per-lot P&L is independent of position size) applies unchanged to EXP-0015, 0016 and 0017, and still makes projections beyond 15-20 lots directional rather than precise.",
+    "CAVEAT-3: EXP-0013's known verdict-logic bug (HANDOFF G6) was not fixed and the script was not re-run with a correction; the bucket P&L figures used here are unaffected by it."
+  ],
+  "next_steps": [
+    "EXP-0020 (PROPOSED): quantify the cost of the tax-withholding HWM artifact per FINDING-3. Needs section 13 approval.",
+    "DECISION-010 remains the blocker for TASK-1: the validated sizing (30% deployment, 20-35 lots) exceeds config/risk.yaml (25%, hard_cap_lots 10), so the ₹49.2L projection does not describe the system as configured.",
+    "Correct the EXP-0016 figures in ASTRA_STATUS.md's capital-goal table or retract it, now that FINDING-1 has settled which record is right."
+  ]
+}

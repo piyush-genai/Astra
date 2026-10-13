@@ -16,7 +16,10 @@
 **Target**: ₹15-20 crore by Dec 2028 via compounded lot scaling (aspiration, not constraint)
 
 **Compounding engine design (validated EXP-0016/0017):**
-- lots = min(floor(net_capital × 0.30 / premium_per_lot) × dd_mult, max_lots_cap)
+- effective_cap = max(1, floor(max_lots_cap × dd_mult))   ← multiplier scales the CAP
+- lots = min(max(1, floor(net_capital × 0.30 / premium_per_lot)), effective_cap)
+  (corrected 2026-10-13 — see DECISION-008; the previous form applied dd_mult to the
+   capital term and could not reproduce EXP-0017's own recorded lot counts)
 - max_lots_cap starts at 10 (paper) / 20 (live); +5 every 3 consecutive profitable months AT 1.0x tier
 - 30% tax reserve withheld each month from net_capital for sizing
 - Drawdown management: Step-down 4-tier (validated EXP-0017, best outcome ₹50k→₹49.2L after tax)

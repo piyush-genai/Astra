@@ -7,8 +7,14 @@
   "git_commit": "c501fe7",
   "strategy": "pivot_cpr_strategy",
   "dataset_version": "nifty-5min-2023-2025 (DATA-001) + india_vix_daily_20230101_to_20251231",
-  "train_range": ["2023-01-02", "2025-12-31"],
-  "test_range": ["2023-01-02", "2025-12-31"],
+  "train_range": [
+    "2023-01-02",
+    "2025-12-31"
+  ],
+  "test_range": [
+    "2023-01-02",
+    "2025-12-31"
+  ],
   "record_provenance": {
     "reconstructed": true,
     "reconstructed_on": "2026-10-13",
@@ -19,8 +25,8 @@
   },
   "config": {
     "base_stack": "P70_L40d adaptive ATR regime filter + VIX×1.1 dynamic IV + VIX tilt sizing (sweet 1.5x / danger 0.5x / else 1x)",
-    "risk_per_trade": 0.30,
-    "tax_rate": 0.30,
+    "risk_per_trade": 0.3,
+    "tax_rate": 0.3,
     "dd_brake_pct": 0.35,
     "base_max_lots": 10,
     "lot_step": 5,
@@ -32,9 +38,21 @@
     "tax_rule": "30% of each profitable month's P&L moved to tax_reserve; reserve excluded from sizing capital"
   },
   "scenarios_defined_in_script": {
-    "SCENARIO_A": {"start_capital": 20000, "initial_max_lots": 10, "label": "conservative"},
-    "SCENARIO_B": {"start_capital": 50000, "initial_max_lots": 20, "label": "moderate"},
-    "SCENARIO_C": {"start_capital": 20000, "initial_max_lots": 25, "label": "growth mode"}
+    "SCENARIO_A": {
+      "start_capital": 20000,
+      "initial_max_lots": 10,
+      "label": "conservative"
+    },
+    "SCENARIO_B": {
+      "start_capital": 50000,
+      "initial_max_lots": 20,
+      "label": "moderate"
+    },
+    "SCENARIO_C": {
+      "start_capital": 20000,
+      "initial_max_lots": 25,
+      "label": "growth mode"
+    }
   },
   "metrics": {
     "note": "No per-scenario result set can be stated with confidence. The two surviving written records disagree — see results_conflict. The only claim both sources support is the qualitative cliff-brake trap (FINDING-1).",
@@ -45,9 +63,21 @@
     },
     "unverified_claim_astra_status": {
       "scenarios": {
-        "20k_10lot": {"gross": 4412853, "after_tax_approx": "~₹30 lakh", "after_slippage_approx": "~₹20-25 lakh"},
-        "50k_20lot": {"gross": 8848311, "after_tax_approx": "~₹60 lakh", "after_slippage_approx": "~₹40-50 lakh"},
-        "20k_50lot": {"gross": 21570418, "after_tax_approx": "~₹1.5 crore", "after_slippage_approx": "~₹80 lakh"}
+        "20k_10lot": {
+          "gross": 4412853,
+          "after_tax_approx": "~₹30 lakh",
+          "after_slippage_approx": "~₹20-25 lakh"
+        },
+        "50k_20lot": {
+          "gross": 8848311,
+          "after_tax_approx": "~₹60 lakh",
+          "after_slippage_approx": "~₹40-50 lakh"
+        },
+        "20k_50lot": {
+          "gross": 21570418,
+          "after_tax_approx": "~₹1.5 crore",
+          "after_slippage_approx": "~₹80 lakh"
+        }
       },
       "source": "ASTRA_STATUS.md 'Capital Goal Context' table, attributed to EXP-0016"
     },
@@ -95,5 +125,11 @@
     "EXP-0017 (DONE): replace the cliff brake with a graduated drawdown function — winner was D_steps, the step-down 4-tier design now in CLAUDE.md.",
     "DATA-RESTORE: re-source the two 2023-2025 CSVs, then run scripts/verify_data.py --record-checksums so this experiment is reproducible against a known-good dataset.",
     "RERUN: re-run scripts/exp_0016_compounded_equity.py and file a new EXP-NNNN record with real numbers; correct or retract the conflicting ASTRA_STATUS.md capital-goal table at that point."
-  ]
+  ],
+  "resolved_by": {
+    "experiment": "EXP-0019",
+    "date": "2026-10-13",
+    "outcome": "Conflict resolved in favour of the ~Rs 10 lakh figure. Re-run gives 20k/10-lot Rs 588,737; 50k/20-lot Rs 1,004,178; 20k/25-lot Rs 1,014,682. The ASTRA_STATUS capital-goal table (~Rs 60 lakh for 50k) is refuted and has been replaced. The 'likely_explanation' guess in results_conflict was never confirmed and remains a guess.",
+    "note": "Recorded claims above are left exactly as filed, per the never-overwrite rule in AGENTS.md section 5. This field is additive."
+  }
 }
