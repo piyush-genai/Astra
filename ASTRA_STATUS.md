@@ -25,6 +25,17 @@
 
 **Phase gate**: WALK_FORWARD ✓ → MONTE_CARLO ✓ → OPTION_SIGNALS ✓ → PAPER_TRADING (next)
 
+**Reproduction audit 2026-10-13 (EXP-0018)**: the 2023-2025 NIFTY dataset was lost (gitignored,
+absent from every clone) and has been re-fetched, verified against 11 integrity checks, and
+checksummed. EXP-0009/0010/0011/0012 were re-run from scratch on Python 3.13 / numpy 2.5.4 and
+**reproduce exactly** — all six filter configs, all three regime breakdowns, the month-by-month
+2025 OOS table, and the full Monte Carlo percentile distribution. P70_L40d is auditable again.
+
+**Still blocked**: `india_vix_daily_20230101_to_20251231.csv` has no fetcher and is still
+missing, so EXP-0013 through EXP-0017 — VIX IV pricing, VIX tilt sizing, the compounding
+engine, and the step-down tiers — remain unreproducible. The ₹49.2L projection sits on that
+side of the line, as does the unresolved 6x conflict in EXP-0016.
+
 **Validated strategy stack (ready for paper trading):**
 1. Signal: PivotCPR momentum breakout (ATLAS baseline)
 2. Regime filter: P70_L40d adaptive ATR (EXP-0010/0011)

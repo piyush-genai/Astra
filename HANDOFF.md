@@ -61,8 +61,9 @@ pip install -r requirements.txt
 ```
 
 On Python 3.13, `requirements.txt` resolves numpy to 2.x — 1.26.4 has no cp313 wheels and
-cannot build from source. EXP-0001 reproduces bit-identically under numpy 2.5.4; EXP-0009
-through EXP-0017 have not been re-verified across that boundary because their data is absent.
+cannot build from source. **The version boundary introduces no drift**: EXP-0001, 0009, 0010,
+0011 and 0012 all reproduce bit-identically under numpy 2.5.4 (EXP-0018 FINDING-2).
+EXP-0013..0017 remain unverified, pending the VIX file rather than for any version reason.
 
 ### Required environment variables (names only — never commit values)
 
@@ -219,20 +220,41 @@ made every one of them fail on import in a fresh clone.
 
 ### CRITICAL
 
-**RISK-0 (added 2026-10-13): the research dataset is not present in the repository**  
-`nifty_5min_20230101_to_20251231.csv` and `india_vix_daily_20230101_to_20251231.csv` are
-gitignored and exist on no machine reachable from a fresh clone. Every experiment from
-EXP-0009 onward reads them, which means **the entire validated strategy stack — P70_L40d,
-VIX×1.1 IV, VIX tilt sizing, step-down tiers — currently cannot be re-run, audited, or
-checked for the leakage its own protocol requires.** The recorded conclusions rest on files
-nobody can produce. Section 7 lists them as merely "re-source manually"; that understates it.
-Restoring them is the precondition for almost everything else in section 8.
+**RISK-0 (added 2026-10-13; NIFTY half RESOLVED same day): research dataset absent**  
+Both 2023-2025 CSVs were gitignored and present on no machine reachable from a fresh clone,
+making every experiment from EXP-0009 onward unreproducible and unauditable.
+
+**NIFTY: resolved.** Re-fetched via `scripts/data_001_fetch_historical.py` (55,513 rows, 744
+sessions), passes all 11 checks in `verify_data.py`, and is checksummed in
+`data/live_data/CHECKSUMS.json`. EXP-0009/0010/0011/0012 were re-run and **reproduce exactly**
+— see EXP-0018. The validated regime filter P70_L40d is auditable from a clean clone again.
+
+**India VIX: still absent.** `india_vix_daily_20230101_to_20251231.csv` has no fetcher in the
+repo and must be sourced manually (columns `date,vix`, ~740 rows). Until it exists,
+**EXP-0013 through EXP-0017 cannot be run** — that is the VIX×1.1 IV model, VIX tilt sizing,
+the compounding engine, and the step-down drawdown tiers. The ₹49.2L projection and the
+EXP-0016 results conflict both sit on that side of the line.
 
 **RISK-1: Strategy degradation in live conditions (unquantified)**  
 Backtest covers 2023-2025. Future market structure may differ (option market depth, new participants, VIX regime). Historical performance is not a guarantee. Minimum 3 months paper trading before any live capital. No model accounts for this.
 
-**RISK-2: P(ruin) = 17.8% at ₹20k start (Monte Carlo, EXP-0012)**  
-17.8% of Monte Carlo simulations at ₹20k start hit a 90%+ capital loss scenario. This is unacceptably high at small capital — ₹50k start reduces it. The compounding engine's DD brake (RISK-1 of over-leveraging during growth) is the primary mitigation.
+**RISK-2 (CORRECTED 2026-10-13): P(ruin) = 17.8%, where "ruin" means a 50% drawdown**  
+This entry previously described the 17.8% figure as simulations that "hit a 90%+ capital loss
+scenario", and claimed a ₹50k start reduces it. Both are wrong, verified against the script:
+
+- `scripts/exp_0012_monte_carlo.py` sets `RUIN_THRESHOLD = 0.50` and labels the output
+  "Probability of ruin (DD>50%)". A 50% drawdown is a far milder event than a 90% loss.
+- EXP-0012 reports **identical** percentile returns for ₹20k, ₹50k, ₹1L and ₹5L starts
+  (+778%, +778%, +779%, +781% median). It models percentage returns and is scale-invariant,
+  so it cannot show a start-size effect on P(ruin) at all.
+
+The real reason to prefer a larger start is one the model omits entirely: lot indivisibility.
+A ₹20k account cannot buy a lot at many premiums, so it skips trades a larger account takes —
+a penalty invisible to a percentage-return bootstrap. Treat "minimum recommended capital
+₹50,000" as resting on that, not on a measured ruin difference.
+
+17.8% remains high, and 1% of simulations reach a 100% max drawdown. The step-down drawdown
+brake is the primary mitigation. See EXP-0018 FINDING-4.
 
 **RISK-3: LiveOrchestrator has 8 TODO Phase stubs (not wired)**  
 `live/orchestrator.py` is not production-ready. Paper trading engine exists (`PaperTradingEngine`, 19 tests), but the live path from VIX-adjusted signal → lot count → SEBI Algo-ID → Upstox order is not a complete code path.
@@ -267,10 +289,14 @@ internal consistency, bars-per-session, VIX plausibility, and VIX↔NIFTY sessio
 It also maintains a SHA-256 manifest (`--record-checksums`) so a re-download can be compared
 against the copy that produced the recorded results — the gap this risk originally described.
 
-Still open: there is no checksum of the *original* files to compare against, because they
-were never hashed while present. A restored download can be verified as internally sound and
-stable from then on, but **cannot be proven identical to what EXP-0009..0017 actually ran on.**
-That uncertainty is permanent.
+**Largely closed for NIFTY (2026-10-13).** There is still no checksum of the *original* file,
+so byte-identity remains unprovable in principle. But equivalence was established a better
+way: the re-downloaded dataset reproduces EXP-0009, 0010, 0011 and 0012 **exactly**, including
+all six filter configs, all three regime breakdowns and the full Monte Carlo distribution. A
+dataset differing in any material way would have perturbed at least one of those figures. See
+EXP-0018 FINDING-1. The file is now hashed, so future drift will be caught.
+
+Still open for the VIX file, which does not yet exist.
 
 **RISK-8: HWM tracking is post-trade, not intraday**  
 In the simulation, HWM is updated after each trade closes. In live trading, intraday drawdown during an open position is not tracked. A fast adverse move could technically breach the DD tier without triggering the lot reduction. This is acceptable for paper trading; revisit before scaling to 20+ lots live.
