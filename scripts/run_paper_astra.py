@@ -293,12 +293,21 @@ def fetch_vix_daily(adapter: UpstoxAdapter, days: int = 120) -> pd.Series:
 def main() -> int:
     parser = argparse.ArgumentParser(description="ASTRA paper trading (validated stack)")
     parser.add_argument("--duration", type=int, default=390, help="session minutes")
-    parser.add_argument("--db", default="astra_paper_state.db", help="SQLite state file")
+    parser.add_argument("--db", default=None, help="SQLite state file")
     parser.add_argument("--capital", type=float, default=None,
                         help="seed capital on first run (default: risk.yaml)")
+    parser.add_argument("--set-capital", type=float, default=None,
+                        help="OVERWRITE persisted capital, even if already seeded")
     parser.add_argument("--preflight", action="store_true",
                         help="run all readiness checks and exit without trading")
     args = parser.parse_args()
+
+    # Preflight must never mutate real trading state. Constructing the engine seeds
+    # capital from risk.yaml if the DB is empty, so an earlier --preflight run would
+    # silently pin the account at ₹20,000 and make a later --capital flag a no-op.
+    # Default it to a throwaway file unless a DB was named explicitly.
+    if args.db is None:
+        args.db = "/tmp/astra_preflight_scratch.db" if args.preflight else "astra_paper_state.db"
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -374,9 +383,25 @@ def main() -> int:
               f"{vix_size_mult(pctile):.1f}x")
 
     # ── engine assembly ──────────────────────────────────────────────────────
+    if args.preflight and args.db.startswith("/tmp/"):
+        Path(args.db).unlink(missing_ok=True)  # always a clean scratch DB
+
     sm = StateManager(args.db)
-    if args.capital is not None and sm.get_capital() == 0.0:
-        sm.update_capital(args.capital, "initial_deposit")
+    if args.set_capital is not None:
+        previous = sm.get_capital()
+        # update_capital() is an absolute setter, not a delta — PaperTradingEngine calls it
+        # as update_capital(capital, "initial_deposit") with the full amount.
+        sm.update_capital(args.set_capital, "manual_capital_reset")
+        print(f"\n  ⚠️  Capital OVERWRITTEN: ₹{previous:,.2f} → ₹{sm.get_capital():,.2f}")
+        logger.warning("Capital manually reset ₹%.2f → ₹%.2f", previous, sm.get_capital())
+    elif args.capital is not None:
+        if sm.get_capital() == 0.0:
+            sm.update_capital(args.capital, "initial_deposit")
+        elif abs(sm.get_capital() - args.capital) > 0.01:
+            print(f"\n  ⚠️  --capital ₹{args.capital:,.0f} IGNORED — this account is already"
+                  f" seeded at ₹{sm.get_capital():,.2f}.")
+            print("      Use --set-capital to overwrite it deliberately, or delete the DB"
+                  " to start fresh.")
 
     lot_mgr = LotManager(config=lot_cfg, gross_capital=max(sm.get_capital(), 1.0))
     sizing_state = SizingState(project_root / SIZING_STATE_FILE)
