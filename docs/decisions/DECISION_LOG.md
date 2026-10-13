@@ -293,9 +293,38 @@ it concedes from, so there is no case for ever raising deployment to 30%.
 **Also**: stop quoting ₹49.2L as the expected outcome. It describes a configuration that has
 never been permitted to run. Under the compliant config the three-year figure is ₹28.2L.
 
-**Blocked on**: verifying the NIFTY per-order freeze quantity via Upstox before assuming a
-20- or 35-lot ceiling is executable at all (EXP-0020 CAVEAT-4). And G1 still applies: the
-high-lot arms are directional, which flatters them.
+**Freeze quantity: RESOLVED 2026-10-13.** Upstox's published instrument master reports
+`freeze_quantity` 3510 with `lot_size` 65 for all 1,888 NIFTY option contracts, so the
+exchange ceiling is **54 lots per order**. Both staged ceilings are executable, and
+`hard_cap_lots: 10` was never an exchange constraint — it is a self-imposed margin ~5x
+tighter. Recorded in `config/risk.yaml` with a note to re-verify at each series rollover,
+since the ceiling moves with lot size.
+
+**Distribution: MEASURED 2026-10-13 (EXP-0021), and it changed the argument.** 2,000-path
+month-block bootstrap, all arms on identical paths:
+
+| Arm | p5 | median | medDD | P(ruin) |
+|---|---|---|---|---|
+| Validated (30%, uncapped) | ₹14.3L | ₹42.6L | 30.6% | **16.4%** |
+| Compliant (25%, 10 lots) | ₹12.5L | ₹26.1L | 23.4% | **9.5%** |
+| Staged (25%, 20 lots) | ₹12.0L | ₹32.9L | 26.8% | **9.5%** |
+| Staged (25%, 35 lots) | ₹11.9L | ₹34.1L | 27.5% | **9.5%** |
+
+The single-path claim that staging is *better risk-adjusted* does not survive resampling and
+is withdrawn: the uncapped arm dominates on terminal wealth at every percentile and its
+drawdown edge shrinks to ~3pp. **The real case for capping is ruin risk** — 16.4% → 9.5% —
+and that reduction is *identical at 10, 20 and 35 lots*. Cap level does not affect P(ruin).
+
+**Final recommendation (unchanged in substance, corrected in reasoning)**: keep 25%
+deployment; stage `hard_cap_lots` 10 → 20 → 35. Staging to 35 rather than complying at 10
+buys +31% median return at the same 9.5% ruin probability. But be clear what the capped-vs-
+uncapped decision costs: **roughly 20% of median terminal wealth for a 42% cut in ruin
+probability.** That is a judgement about ruin tolerance, not a free optimisation.
+
+**Remaining caveats**: G1 still flatters the uncapped arm (it reaches the largest positions),
+so its dominance is if anything overstated. And month blocks are drawn independently, so if
+bad months cluster in reality more than independent draws imply, every tail here is
+optimistic — the uncapped arm's most of all. EXP-0022 is proposed to relax that.
 
 **Impact until resolved**: `LotManagerConfig.from_risk_config()` raises `RiskLimitConflict`
 rather than clamping, so this conflict surfaces at construction instead of silently halving

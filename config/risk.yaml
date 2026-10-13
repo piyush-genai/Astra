@@ -38,8 +38,17 @@ position_limits:
   # Absolute ceiling on lots per single order, independent of capital.
   # Exists to catch a sizing bug producing an absurd order, and to respect
   # the exchange's per-order freeze quantity for the current lot size.
-  # VERIFY current NIFTY freeze quantity via Upstox's option contract API
-  # (freeze_quantity field) before trusting this number — do not assume it.
+  #
+  # VERIFIED 2026-10-13 against Upstox's published instrument master
+  # (assets.upstox.com/market-quote/instruments/exchange/complete.json.gz):
+  # all 1,888 NIFTY option contracts report freeze_quantity 3510 with lot_size 65,
+  # so the exchange ceiling is 3510/65 = 54 lots per order.
+  #
+  # 10 is therefore NOT an exchange constraint — it is a self-imposed margin roughly
+  # 5x tighter. Treat it as the staged risk parameter (EXP-0020/0021, DECISION-010):
+  # 10 paper → 20 shadow → 35 live, each step a human decision under AGENTS.md s6.
+  # Re-verify freeze_quantity before each series rollover; lot_size changed to 65 in
+  # Jan 2026 and the ceiling moves with it.
   hard_cap_lots: 10
 
 algo_ids:

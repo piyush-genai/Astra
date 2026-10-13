@@ -7,8 +7,14 @@
   "git_commit": "e5b38c6",
   "strategy": "pivot_cpr_strategy",
   "dataset_version": "nifty-5min-2023-2025 sha256 830bd8bb6f70d1b4… + india_vix_daily-2023-2025 sha256 ddb209c300682272… (CHECKSUMS.json)",
-  "train_range": ["2023-01-02", "2025-12-31"],
-  "test_range": ["2023-01-02", "2025-12-31"],
+  "train_range": [
+    "2023-01-02",
+    "2025-12-31"
+  ],
+  "test_range": [
+    "2023-01-02",
+    "2025-12-31"
+  ],
   "motivation": "DECISION-010. This experiment changes no risk limits and touches no execution path — it measures what the existing configured limits produce. The alternative on the table was to raise the limits so the backtest remains quotable, which is the failure mode AGENTS.md section 14 names explicitly.",
   "method": "EXP-0017's method: collect the 1,522 one-lot trades once (P70_L40d + VIX×1.1 IV + VIX tilt), then replay under seven sizing configurations, all using the D_steps 4-tier drawdown multiplier, 30% monthly tax reserve and the slippage model. The 'validated' arm is a control that must reproduce EXP-0017 exactly, and does, at both start capitals.",
   "harness_validation": {
@@ -21,24 +27,113 @@
   },
   "metrics": {
     "start_50k": {
-      "validated_30pct_20lots_uncapped":   {"net_after_tax": 4920067, "return_pct": 9740, "max_dd_pct": 31.9, "months_reduced": "16/34", "peak_lots": 35},
-      "compliant_25pct_10lots_hard":       {"net_after_tax": 2823528, "return_pct": 5547, "max_dd_pct": 23.7, "months_reduced": "13/34", "peak_lots": 10, "compliant": true},
-      "isolate_deploy_25pct_20lots":       {"net_after_tax": 4937019, "return_pct": 9774, "max_dd_pct": 32.0, "months_reduced": "16/34", "peak_lots": 35},
-      "isolate_lotcap_30pct_10lots_hard":  {"net_after_tax": 2822968, "return_pct": 5546, "max_dd_pct": 24.5, "months_reduced": "13/34", "peak_lots": 10},
-      "staged_shadow_25pct_20lots_hard":   {"net_after_tax": 3946180, "return_pct": 7792, "max_dd_pct": 23.7, "months_reduced": "14/34", "peak_lots": 20},
-      "staged_live_25pct_35lots_hard":     {"net_after_tax": 4155673, "return_pct": 8211, "max_dd_pct": 23.7, "months_reduced": "14/34", "peak_lots": 30},
-      "hwm_artifact_removed":              {"net_after_tax": 6536373, "return_pct": 12973, "max_dd_pct": 46.2, "months_reduced": "9/34", "peak_lots": 45}
+      "validated_30pct_20lots_uncapped": {
+        "net_after_tax": 4920067,
+        "return_pct": 9740,
+        "max_dd_pct": 31.9,
+        "months_reduced": "16/34",
+        "peak_lots": 35
+      },
+      "compliant_25pct_10lots_hard": {
+        "net_after_tax": 2823528,
+        "return_pct": 5547,
+        "max_dd_pct": 23.7,
+        "months_reduced": "13/34",
+        "peak_lots": 10,
+        "compliant": true
+      },
+      "isolate_deploy_25pct_20lots": {
+        "net_after_tax": 4937019,
+        "return_pct": 9774,
+        "max_dd_pct": 32.0,
+        "months_reduced": "16/34",
+        "peak_lots": 35
+      },
+      "isolate_lotcap_30pct_10lots_hard": {
+        "net_after_tax": 2822968,
+        "return_pct": 5546,
+        "max_dd_pct": 24.5,
+        "months_reduced": "13/34",
+        "peak_lots": 10
+      },
+      "staged_shadow_25pct_20lots_hard": {
+        "net_after_tax": 3946180,
+        "return_pct": 7792,
+        "max_dd_pct": 23.7,
+        "months_reduced": "14/34",
+        "peak_lots": 20
+      },
+      "staged_live_25pct_35lots_hard": {
+        "net_after_tax": 4155673,
+        "return_pct": 8211,
+        "max_dd_pct": 23.7,
+        "months_reduced": "14/34",
+        "peak_lots": 30
+      },
+      "hwm_artifact_removed": {
+        "net_after_tax": 6536373,
+        "return_pct": 12973,
+        "max_dd_pct": 46.2,
+        "months_reduced": "9/34",
+        "peak_lots": 45
+      }
     },
     "start_20k": {
-      "validated_30pct_20lots_uncapped":   {"net_after_tax": 4809113, "return_pct": 23946, "max_dd_pct": 30.5, "months_reduced": "17/34", "peak_lots": 35},
-      "compliant_25pct_10lots_hard":       {"net_after_tax": 2800845, "return_pct": 13904, "max_dd_pct": 25.0, "months_reduced": "13/34", "peak_lots": 10, "compliant": true},
-      "isolate_deploy_25pct_20lots":       {"net_after_tax": 4799293, "return_pct": 23896, "max_dd_pct": 30.2, "months_reduced": "16/34", "peak_lots": 35},
-      "isolate_lotcap_30pct_10lots_hard":  {"net_after_tax": 2801822, "return_pct": 13909, "max_dd_pct": 24.9, "months_reduced": "13/34", "peak_lots": 10},
-      "staged_shadow_25pct_20lots_hard":   {"net_after_tax": 3922528, "return_pct": 19513, "max_dd_pct": 25.0, "months_reduced": "14/34", "peak_lots": 20},
-      "staged_live_25pct_35lots_hard":     {"net_after_tax": 4132021, "return_pct": 20560, "max_dd_pct": 25.0, "months_reduced": "14/34", "peak_lots": 30},
-      "hwm_artifact_removed":              {"net_after_tax": 6500328, "return_pct": 32402, "max_dd_pct": 45.7, "months_reduced": "9/34", "peak_lots": 45}
+      "validated_30pct_20lots_uncapped": {
+        "net_after_tax": 4809113,
+        "return_pct": 23946,
+        "max_dd_pct": 30.5,
+        "months_reduced": "17/34",
+        "peak_lots": 35
+      },
+      "compliant_25pct_10lots_hard": {
+        "net_after_tax": 2800845,
+        "return_pct": 13904,
+        "max_dd_pct": 25.0,
+        "months_reduced": "13/34",
+        "peak_lots": 10,
+        "compliant": true
+      },
+      "isolate_deploy_25pct_20lots": {
+        "net_after_tax": 4799293,
+        "return_pct": 23896,
+        "max_dd_pct": 30.2,
+        "months_reduced": "16/34",
+        "peak_lots": 35
+      },
+      "isolate_lotcap_30pct_10lots_hard": {
+        "net_after_tax": 2801822,
+        "return_pct": 13909,
+        "max_dd_pct": 24.9,
+        "months_reduced": "13/34",
+        "peak_lots": 10
+      },
+      "staged_shadow_25pct_20lots_hard": {
+        "net_after_tax": 3922528,
+        "return_pct": 19513,
+        "max_dd_pct": 25.0,
+        "months_reduced": "14/34",
+        "peak_lots": 20
+      },
+      "staged_live_25pct_35lots_hard": {
+        "net_after_tax": 4132021,
+        "return_pct": 20560,
+        "max_dd_pct": 25.0,
+        "months_reduced": "14/34",
+        "peak_lots": 30
+      },
+      "hwm_artifact_removed": {
+        "net_after_tax": 6500328,
+        "return_pct": 32402,
+        "max_dd_pct": 45.7,
+        "months_reduced": "9/34",
+        "peak_lots": 45
+      }
     },
-    "compliance_cost_pct_of_validated": {"50k": 42.6, "20k": 41.8}
+    "compliance_cost_pct_of_validated": {
+      "50k": 42.6,
+      "20k": 41.8
+    }
   },
   "findings": {
     "FINDING-1": {
@@ -77,5 +172,12 @@
     "Verify the NIFTY per-order freeze quantity via Upstox before assuming any staged lot ceiling above 10 is even executable (CAVEAT-4).",
     "EXP-0021 (PROPOSED): Monte Carlo the sizing arms, so the staged-path recommendation rests on a distribution rather than one historical path.",
     "DECISION-009 should be updated with FINDING-3: the HWM artifact is a risk brake, so 'fixing' it is a trade, not a correction."
-  ]
+  ],
+  "superseded_in_part_by": {
+    "experiment": "EXP-0021",
+    "date": "2026-10-13",
+    "what_was_withdrawn": "FINDING-2's claim that the 35-lot staged ceiling is 'better risk-adjusted than the design it concedes from'. That rested on the single realised path, where staged showed 23.7% max DD vs the validated config's 31.9%. Across 2,000 resampled paths the gap shrinks to 27.5% vs 30.6% while median terminal capital is 0.80x, and the validated arm dominates at every return percentile measured.",
+    "what_still_holds": "FINDING-1 (the 25% deployment limit costs nothing; hard_cap_lots is the whole constraint) is unaffected — it is a same-path isolation result. The staged recommendation also still holds, but on ruin-risk grounds: P(ruin) 16.4% uncapped vs 9.5% capped, identical at 10/20/35 lots.",
+    "note": "Recorded metrics and findings above are left as filed, per the never-overwrite rule in AGENTS.md section 5. This field is additive."
+  }
 }

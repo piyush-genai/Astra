@@ -1,0 +1,67 @@
+{
+  "exp_id": "EXP-0021",
+  "hypothesis": "EXP-0020's staged lot-cap recommendation was derived from the single realised 2023-2025 path. On a distribution of resampled paths the staged ceiling will still look better risk-adjusted than the uncapped validated config, as EXP-0020 FINDING-2 claimed.",
+  "status": "COMPLETED",
+  "created_at": "2026-10-13T21:20:00.000000",
+  "updated_at": "2026-10-13T21:45:00.000000",
+  "git_commit": "74548b7",
+  "strategy": "pivot_cpr_strategy",
+  "dataset_version": "nifty-5min-2023-2025 sha256 830bd8bb6f70d1b4… + india_vix_daily-2023-2025 sha256 ddb209c300682272… (CHECKSUMS.json)",
+  "train_range": ["2023-01-02", "2025-12-31"],
+  "test_range": ["2023-01-02", "2025-12-31"],
+  "method": "2,000 simulations, month-block bootstrap, seed 42. Each simulation draws 34 month blocks with replacement from the 34 observed months and replays them in the drawn order, preserving each month's internal trade sequence. The resampling unit is the month rather than the trade because the compounding engine has monthly cadence — tax withheld at month close, lot cap grown on monthly streaks, drawdown tier re-evaluated against a monthly high-water mark — and trade-level resampling would destroy the structure the tier logic responds to. All four arms are evaluated on the SAME 2,000 month orderings, so comparisons are paired and the variance of the comparison is far lower than independent draws would give.",
+  "metrics": {
+    "sims": 2000,
+    "start_capital": 50000,
+    "ruin_definition": "max drawdown >= 50% of the month-end net-capital peak (same threshold as EXP-0012)",
+    "arms": {
+      "validated_30pct_20lots_uncapped": {"p5": 1425978, "median": 4258180, "p95": 9031547, "median_dd_pct": 30.6, "p_ruin_pct": 16.4},
+      "compliant_25pct_10lots":          {"p5": 1247375, "median": 2612704, "p95": 3964191, "median_dd_pct": 23.4, "p_ruin_pct": 9.5},
+      "staged_25pct_20lots":             {"p5": 1198592, "median": 3288980, "p95": 5720809, "median_dd_pct": 26.8, "p_ruin_pct": 9.5},
+      "staged_25pct_35lots":             {"p5": 1189353, "median": 3412428, "p95": 7014896, "median_dd_pct": 27.5, "p_ruin_pct": 9.5}
+    },
+    "paired_vs_validated": {
+      "compliant_25pct_10lots": {"median_ratio": 0.60, "beats_validated_pct_of_paths": 3.9},
+      "staged_25pct_20lots":    {"median_ratio": 0.74, "beats_validated_pct_of_paths": 5.0},
+      "staged_25pct_35lots":    {"median_ratio": 0.80, "beats_validated_pct_of_paths": 7.1}
+    }
+  },
+  "findings": {
+    "FINDING-1": {
+      "title": "HYPOTHESIS REFUTED — EXP-0020 FINDING-2 was an artefact of the single path",
+      "detail": "On the realised path, the 35-lot staged arm showed 23.7% max drawdown against the validated config's 31.9%, which made it look better risk-adjusted. Across 2,000 resampled paths that edge largely disappears: median drawdown is 27.5% versus 30.6%, only ~3 percentage points, while median terminal capital is 0.80x the validated arm's. The validated config in fact dominates on terminal wealth at every percentile measured — p5 ₹14.3L vs ₹11.9L, median ₹42.6L vs ₹34.1L, p95 ₹90.3L vs ₹70.1L — and the staged arm beats it on only 7.1% of paths. EXP-0020's claim that staging is 'better risk-adjusted than the design it concedes from' does not survive resampling and is withdrawn.",
+      "confidence": "HIGH — paired comparison on identical paths, 2,000 sims"
+    },
+    "FINDING-2": {
+      "title": "The real case for capping is ruin risk, and the cap LEVEL does not matter",
+      "detail": "P(ruin) is 16.4% for the uncapped validated arm and 9.5% for all three capped arms — identical at 10, 20 and 35 lots. Capping at any level cuts ruin probability by about 42%; where the cap sits changes nothing. The ruin risk comes from uncapped growth into position sizes that cannot survive a bad month cluster, not from the ceiling's height. Note that the validated arm's 16.4% is close to EXP-0012's independently-derived 17.8%, which is mild corroboration across two different models.",
+      "confidence": "HIGH — the identical 9.5% across three cap levels is a clean result, not a marginal one"
+    },
+    "FINDING-3": {
+      "title": "This strengthens rather than weakens the staged recommendation — for a different reason",
+      "detail": "Because P(ruin) is cap-level-independent, staging to 35 lots captures markedly more return than complying at 10 for no additional ruin risk: median ₹34.1L vs ₹26.1L (+31%), both at 9.5% P(ruin), with median drawdown 27.5% vs 23.4%. So the choice is not 'safety versus return' between 10 and 35 — it is +31% median return for +4pp median drawdown at unchanged ruin probability. The genuine trade-off sits between capped and uncapped, not between cap levels.",
+      "confidence": "MEDIUM-HIGH — direction is robust; G1 means the 35-lot arm's upside is directional"
+    },
+    "FINDING-4": {
+      "title": "Full compliance has the best worst case among capped arms, but by a small margin",
+      "detail": "At the 5th percentile the 10-lot compliant arm returns ₹12.47L against ₹11.89L for the 35-lot staged arm — a 5% edge in the left tail, because it never scales into a bad cluster. That is a real but modest argument for starting conservative, and it is consistent with staging the cap upward only as behaviour is validated rather than setting it high at the outset.",
+      "confidence": "MEDIUM — a 5% gap at p5 on 2,000 sims is near the resolution of this method"
+    }
+  },
+  "conclusion": "HYPOTHESIS REFUTED, and the recommendation survives on different grounds. EXP-0020's single-path finding that a staged lot ceiling is better risk-adjusted than the uncapped validated config is withdrawn: across 2,000 resampled paths the validated config dominates on terminal wealth at every percentile and its drawdown edge shrinks to ~3 percentage points. What does hold, and more cleanly, is that capping lots at all cuts P(ruin) from 16.4% to 9.5%, and that this reduction is identical at 10, 20 and 35 lots. The practical consequence is that the staged path is justified by ruin risk rather than by risk-adjusted return, and that staging to 35 is close to free relative to complying at 10: +31% median return at the same 9.5% ruin probability. The recommendation to DECISION-010 is unchanged in substance — keep 25% deployment, stage hard_cap_lots 10 → 20 → 35 — but a decision-maker should understand they are buying a 42% reduction in ruin probability with roughly 20% of median terminal wealth, not getting a free improvement.",
+  "leakage_checked": false,
+  "walk_forward_done": false,
+  "monte_carlo_done": true,
+  "caveats": [
+    "CAVEAT-1: A block bootstrap recombines OBSERVED months. Every simulated path is assembled from regimes that actually occurred in 2023-2025, so this measures sensitivity to the order and repetition of those regimes — the relevant question for a drawdown-tiered engine, since tier behaviour depends on whether bad months cluster — but it cannot price a regime absent from the 34-month sample. A genuinely adverse unseen regime is outside the support of this distribution.",
+    "CAVEAT-2: Month blocks are drawn independently, which destroys any real autocorrelation between consecutive months. If bad months genuinely cluster in markets more than independent draws imply, every arm's tail here is optimistic — and the uncapped arm's most of all, since it is the one that scales into clusters.",
+    "CAVEAT-3: G1 applies unchanged. Post-hoc replay assumes per-lot P&L is independent of position size, so arms reaching 30+ lots are directional. This flatters the uncapped validated arm most, meaning FINDING-1's dominance result is, if anything, overstated.",
+    "CAVEAT-4: Max drawdown is computed from the month-end net-capital series, as in EXP-0020. Not comparable to EXP-0017's published drawdown figures, which use a different definition.",
+    "CAVEAT-5: 2,000 sims rather than EXP-0012's 10,000, since each sim replays 1,522 trades across four arms. Percentile estimates at p5/p95 carry correspondingly more noise; FINDING-4's 5% gap is near the resolution limit."
+  ],
+  "next_steps": [
+    "Human decision on DECISION-010, now with a distribution: keep 25% deployment, stage hard_cap_lots 10 → 20 → 35. The cost is ~20% of median terminal wealth for a 42% cut in ruin probability.",
+    "Freeze quantity is resolved — 54 lots per order (3510/65), verified against Upstox's instrument master and recorded in config/risk.yaml. Both staged ceilings are executable; 10 was never an exchange constraint.",
+    "EXP-0022 (PROPOSED): re-run this with a stationary block bootstrap of random block length, or with month blocks drawn in contiguous runs, to relax CAVEAT-2 and test whether month clustering changes the ranking."
+  ]
+}
