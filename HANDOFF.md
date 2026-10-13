@@ -54,11 +54,15 @@ tax_reserve  = 30% of each profitable month's P&L withheld (NOT available for lo
 ### Environment setup
 
 ```bash
-cd /workshop/atlas
-python3 -m venv .venv              # if not already present
+cd <repo-root>                     # the clone directory; no absolute path is baked in anymore
+python3.13 -m venv .venv           # any Python 3.11+ (AGENTS.md section 10)
 source .venv/bin/activate
-pip install -r requirements.txt    # or: pip install pandas numpy scipy
+pip install -r requirements.txt
 ```
+
+On Python 3.13, `requirements.txt` resolves numpy to 2.x — 1.26.4 has no cp313 wheels and
+cannot build from source. EXP-0001 reproduces bit-identically under numpy 2.5.4; EXP-0009
+through EXP-0017 have not been re-verified across that boundary because their data is absent.
 
 ### Required environment variables (names only — never commit values)
 
@@ -91,7 +95,7 @@ python3 scripts/run_backtest.py    # full ATLAS baseline
 ### Rerun EXP-0017 (drawdown-adaptive lot sizing — the final compounding experiment)
 
 ```bash
-cd /workshop/atlas
+cd <repo-root>
 python3 -u scripts/exp_0017_drawdown_management.py
 ```
 
@@ -107,7 +111,10 @@ python3 -u scripts/exp_0016_compounded_equity.py
 python3 -u scripts/exp_0017_drawdown_management.py
 ```
 
-All scripts are self-contained (insert `/workshop/atlas` into sys.path) and run from the repo root.
+All scripts are self-contained and must be run from the repo root (their data paths are
+relative to the working directory). They derive the repo root from `__file__` for sys.path,
+so the clone can live anywhere — up to 2026-10-13 all 17 hardcoded `/workshop/atlas`, which
+made every one of them fail on import in a fresh clone.
 
 ---
 
@@ -195,13 +202,22 @@ All scripts are self-contained (insert `/workshop/atlas` into sys.path) and run 
 
 ### CRITICAL
 
+**RISK-0 (added 2026-10-13): the research dataset is not present in the repository**  
+`nifty_5min_20230101_to_20251231.csv` and `india_vix_daily_20230101_to_20251231.csv` are
+gitignored and exist on no machine reachable from a fresh clone. Every experiment from
+EXP-0009 onward reads them, which means **the entire validated strategy stack — P70_L40d,
+VIX×1.1 IV, VIX tilt sizing, step-down tiers — currently cannot be re-run, audited, or
+checked for the leakage its own protocol requires.** The recorded conclusions rest on files
+nobody can produce. Section 7 lists them as merely "re-source manually"; that understates it.
+Restoring them is the precondition for almost everything else in section 8.
+
 **RISK-1: Strategy degradation in live conditions (unquantified)**  
 Backtest covers 2023-2025. Future market structure may differ (option market depth, new participants, VIX regime). Historical performance is not a guarantee. Minimum 3 months paper trading before any live capital. No model accounts for this.
 
 **RISK-2: P(ruin) = 17.8% at ₹20k start (Monte Carlo, EXP-0012)**  
 17.8% of Monte Carlo simulations at ₹20k start hit a 90%+ capital loss scenario. This is unacceptably high at small capital — ₹50k start reduces it. The compounding engine's DD brake (RISK-1 of over-leveraging during growth) is the primary mitigation.
 
-**RISK-3: LiveOrchestrator has 6 TODO Phase stubs (not wired)**  
+**RISK-3: LiveOrchestrator has 8 TODO Phase stubs (not wired)**  
 `live/orchestrator.py` is not production-ready. Paper trading engine exists (`PaperTradingEngine`, 19 tests), but the live path from VIX-adjusted signal → lot count → SEBI Algo-ID → Upstox order is not a complete code path.
 
 ### HIGH
@@ -212,16 +228,44 @@ Any automated order placement requires ALGO_ID registered with NSE/SEBI. Must be
 **RISK-5: Slippage model is conservative but unvalidated at scale**  
 ₹2/unit extra per lot above 10 is a rule-of-thumb. NIFTY ATM options at 25-35 lots may have wider spreads, especially during fast markets. The actual live P&L may be 5-15% below backtest at 20+ lots.
 
-**RISK-6: EXP-0016.json record is missing**  
-The experiment JSON for EXP-0016 was never written to `research/experiments/`. Only the script was committed. The compounding-with-cliff-brake results are documented only in ASTRA_STATUS.md and this file. Create `research/experiments/EXP-0016.json` before the next paper trading session.
+**RISK-6 (REVISED 2026-10-13): EXP-0016's numbers are unrecoverable, and two records disagree**  
+`research/experiments/EXP-0016.json` now exists, but it is a reconstruction from documentation
+rather than from a run — the 2023-2025 CSVs are absent, so the script cannot be re-executed.
+Writing it surfaced a worse problem than the missing file: the two surviving records disagree
+about the ₹50k scenario by roughly 6x. This file and ASTRA_STATUS.md line 89 say ₹10 lakh net
+after tax; the ASTRA_STATUS.md capital-goal table says ₹88,48,311 gross / ~₹60 lakh after tax
+for the same scenario. The scenario lists disagree too — the committed script defines ₹20k at
+25 lots, the table lists ₹20k at 50 lots.
+
+**Do not quote any EXP-0016 capital figure until the script is re-run.** The qualitative
+cliff-brake finding is unaffected and is corroborated by both sources. See the
+`results_conflict` block in EXP-0016.json.
 
 ### MEDIUM
 
-**RISK-7: Data quality of `nifty_5min_20230101_to_20251231.csv` is unverified**  
-The CSV is gitignored and not checksummed. Any silent corruption (missing days, wrong timestamps) would invalidate all EXP-0009 through EXP-0017 results. Add a data integrity check (row count, date range, business-day completeness) to `scripts/verify_data.py` (not yet built).
+**RISK-7 (PARTIALLY ADDRESSED 2026-10-13): data quality was unverifiable**  
+`scripts/verify_data.py` now exists and checks row counts, column presence, chronological
+ordering, duplicate timestamps, date-range coverage, unexplained business-day gaps, OHLC
+internal consistency, bars-per-session, VIX plausibility, and VIX↔NIFTY session alignment.
+It also maintains a SHA-256 manifest (`--record-checksums`) so a re-download can be compared
+against the copy that produced the recorded results — the gap this risk originally described.
+
+Still open: there is no checksum of the *original* files to compare against, because they
+were never hashed while present. A restored download can be verified as internally sound and
+stable from then on, but **cannot be proven identical to what EXP-0009..0017 actually ran on.**
+That uncertainty is permanent.
 
 **RISK-8: HWM tracking is post-trade, not intraday**  
 In the simulation, HWM is updated after each trade closes. In live trading, intraday drawdown during an open position is not tracked. A fast adverse move could technically breach the DD tier without triggering the lot reduction. This is acceptable for paper trading; revisit before scaling to 20+ lots live.
+
+**RISK-9 (added 2026-10-13): EXP-0005's script was never committed**  
+`research/experiments/EXP-0005.json` records the ATR>30 filter as "MAJOR ALPHA" (+938% vs
++376% baseline) — the result that started the entire regime-filter line of research leading to
+P70_L40d. There is no `scripts/exp_0005_*.py`; the scripts jump from 0004 to 0006. The finding
+was later superseded by EXP-0010's adaptive percentile, and EXP-0009 showed the fixed ATR>30
+threshold fails out-of-sample, so nothing in the current stack depends on it. But the
+foundational experiment of the research programme is not reproducible, which violates the
+reproducibility requirement in AGENTS.md section 1 item 3.
 
 ---
 
@@ -258,25 +302,58 @@ Implement in `scripts/run_paper_astra.py`:
 - Start with `max_lots=10` (conservative paper mode)
 - Run for minimum 3 months before any live capital decision
 
-**TASK-2 (EXP-0016-JSON)**: Write the missing experiment record.
+**TASK-2 (EXP-0016-JSON)**: ~~Write the missing experiment record.~~ **DONE 2026-10-13, with a caveat.**
 
-Create `research/experiments/EXP-0016.json` with results from `scripts/exp_0016_compounded_equity.py`. The cliff-brake design is documented only in ASTRA_STATUS.md right now. The JSON should record the 3 scenarios (₹20k/10-lot, ₹50k/20-lot, ₹20k/25-lot), the cliff-brake trap finding, and the `next_steps` pointer to EXP-0017.
+`research/experiments/EXP-0016.json` is written and the registry is now contiguous
+EXP-0001..EXP-0017. It records the design (read from the committed script, reliable), the
+cliff-brake trap finding, the caveats, and the pointer to EXP-0017. It does **not** record
+trustworthy capital figures: the script could not be re-run without the data, and the two
+written sources conflict by ~6x. See revised RISK-6. The record is explicitly marked
+`"reconstructed": true` / `"reproduced": false` so it cannot be mistaken for a real run.
 
-**TASK-3 (DATA-INTEGRITY)**: Add a data verification script.
+**TASK-3 (DATA-INTEGRITY)**: ~~Add a data verification script.~~ **DONE 2026-10-13.**
 
-Create `scripts/verify_data.py` that checks:
-- Row count of `nifty_5min_20230101_to_20251231.csv` (expected ~220,000 rows)
-- Date range coverage (Jan 2, 2023 – Dec 31, 2025)
-- No gaps > 1 business day in daily close
-- VIX file date alignment with NIFTY file
+`scripts/verify_data.py` is written and passes all 11 checks against the one dataset present
+(`nifty_5min_20260201_to_20260731.csv`), and correctly reports the two 2023-2025 files as
+ABSENT. Run `--record-checksums` once the files are restored and trusted.
 
-**TASK-4 (LIVE-ORCHESTRATOR)**: Resolve the 6 Phase stubs in `live/orchestrator.py`.
+Two corrections to this task as originally specified:
+- The expected row count of **~220,000 is wrong by about 4x.** The NSE cash session is
+  09:15–15:30 = 375 minutes = 75 five-minute bars per day, so three years at ~740 trading
+  days is **~55,000 rows**, not 220,000. Confirmed against the 2026 file, which holds exactly
+  9,225 rows = 123 sessions × 75. The script derives this from the date range instead of
+  hardcoding it.
+- "No gaps > 1 business day" would flag every NSE holiday as corruption. The script treats
+  gaps of up to 3 business days as benign holiday clusters and fails only beyond that.
 
-Currently there are 6 `TODO Phase 1:` stubs. These must be wired before shadow trading. Relevant items: strategy registry lookup, live feed subscription, order placement via ExecutionEngine, kill switch file polling, ALGO_ID injection.
+**TASK-4 (LIVE-ORCHESTRATOR)**: Resolve the 8 Phase stubs in `live/orchestrator.py`.
 
-**TASK-5 (LOT-CAP-GROWTH-RULE)**: Implement and test the lot-cap growth rule.
+Currently there are 8 `TODO Phase` stubs (6 are `TODO Phase 1:`, 2 are `TODO Phase 2:`). These must be wired before shadow trading. Relevant items: strategy registry lookup, live feed subscription, order placement via ExecutionEngine, kill switch file polling, ALGO_ID injection.
 
-The step-down design includes: max_lots grows +5 every 3 consecutive profitable months, BUT only when at 1.00x tier. This rule is documented and simulated in EXP-0017 but not yet implemented in any live or paper trading code path. Must be in place before paper trading starts so the lot-cap scaling behavior is consistent with the backtest projections.
+**TASK-5 (LOT-CAP-GROWTH-RULE)**: ~~Implement and test the lot-cap growth rule.~~
+**IMPLEMENTED 2026-10-13 — deliberately NOT wired.**
+
+`src/astra/risk/lot_manager.py` implements the step-down 4-tier multiplier, the +5-lots-per-
+3-consecutive-profitable-months cap growth gated on the 1.00x tier, the 30% monthly tax
+reserve, the ₹500 premium floor, and HWM tracking. 41 tests in `tests/risk/test_lot_manager.py`.
+
+**Nothing imports it.** Wiring position sizing into an order-capable path needs human approval
+(AGENTS.md section 13), so activation is a separate step — see DECISION-007.
+
+Implementing it surfaced three problems that the documented spec hid:
+
+1. **The written sizing formula cannot reproduce the validated results.** All three documents
+   apply the drawdown multiplier to the capital term; EXP-0017's own narrative ("0.35x × 20 =
+   7 lots max") only works if it scales the lot *cap*. At a 0.35 tier with ample capital the
+   two forms give 7 lots vs 20 — a ~3x exposure difference. See DECISION-008.
+2. **EXP-0017's recommended per-trade HWM marking introduces a tax artifact.** It was never
+   simulated; `exp_0016_compounded_equity.py` marks the peak at month close, after tax. Under
+   per-trade marking, a month earning 50% of capital withholds 15% of it and demotes the
+   engine a tier with no loss having occurred. See DECISION-009.
+3. **The validated sizing is illegal under `config/risk.yaml`.** The design wants 30%
+   deployment and 20-35 lots; the config permits 25% and `hard_cap_lots: 10`. The ₹49.2L
+   projection therefore does not describe the system as currently configured. The module
+   raises `RiskLimitConflict` rather than clamping. **This blocks TASK-1.** See DECISION-010.
 
 ---
 
@@ -300,8 +377,12 @@ For step-down: 17/34 months in reduced mode means 17 months had at least one tra
 **G6: EXP-0013 verdict logic had a bug (documented, not code-fixed).**  
 The `better = r["win_pct"] > atr_base["win_pct"]` comparison was against a 0% baseline (the baseline compared against itself). The correct comparison is `r["net_pnl"] > atr_base["net_pnl"]`. The script already ran and is not re-run. The correct interpretation is documented in `research/experiments/EXP-0013.json` findings. Do not trust the `beat_count` field — use `net_pnl` comparisons directly.
 
-**G7: `astr` remote is canonical; `origin` points to the old ATLAS repo.**  
-`git remote -v` shows two remotes. Always push to `astra` (piyush-genai/Astra.git). The `origin` remote (piyush-genai/atlas.git) is the original ATLAS repo — it is 20 commits behind and no longer the primary remote. Do not push to `origin` unless explicitly migrating ATLAS.
+**G7 (OBSOLETE as of 2026-10-13): remote layout changed.**  
+This gotcha warned that `astra` was canonical and `origin` pointed at the old ATLAS repo. A
+fresh clone now has exactly one remote: `origin → https://github.com/piyush-genai/Astra.git`,
+which is the canonical repo. There is no `astra` remote and no second remote to confuse it
+with. Push to `origin`. Kept here rather than deleted because the old instruction to "always
+push to `astra`" would now fail outright.
 
 **G8: Kill switch file overrides everything.**  
 If `KILL_SWITCH.txt` exists in the repo root, `core/kill_switch.py` halts all order placement regardless of strategy state. This is a manual emergency stop. Do not delete it to fix a paper trading test — investigate why it was triggered.

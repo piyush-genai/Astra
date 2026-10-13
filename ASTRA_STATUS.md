@@ -167,7 +167,18 @@
 **Starting capital**: ₹20,000–₹50,000  
 **Current approach**: Compound capital — reinvest profits into more lots as capital grows
 
-**Compounded backtest projections (2023-2025 validated data, EXP-0016):**
+**⚠️ DISPUTED — DO NOT CITE (flagged 2026-10-13).** The table below is attributed to EXP-0016
+but contradicts the EXP-0016 result recorded on line 89 of this same file (₹50k → ₹10 lakh
+after tax) by roughly 6x, and lists a ₹20k/50-lot scenario where the committed script
+`scripts/exp_0016_compounded_equity.py` defines ₹20k/25-lot. Its tax and slippage columns are
+round approximations rather than computed outputs, unlike every other recorded result, which
+suggests it predates the drawdown-brake and tax-reserve logic and may describe an earlier run
+such as `scripts/run_compounding_backtest.py`. That is an unconfirmed guess.
+
+The 2023-2025 CSVs are absent from the repo (RISK-0), so neither figure can currently be
+re-derived. Use the EXP-0017 step-down numbers below instead — those have a committed record.
+Resolution requires re-running the script and filing a new experiment ID.
+
 | Start | Lot cap | 3-yr end (GROSS) | After 30% tax | After slippage |
 |---|---|---|---|---|
 | ₹20,000 | 10 lots | ₹44,12,853 | ~₹30 lakh | ~₹20-25 lakh |

@@ -2,6 +2,20 @@
 
 > **Atlas** is the trading engine. **Astra** is the brain that runs it.
 
+> **⚠️ This README is partly out of date (reviewed 2026-10-13).** It describes the original
+> product vision and is still useful for that, but it is not a reliable guide to the current
+> repository. Specifically:
+> - The **5-Phase Build Plan** below is superseded by the 18-phase plan in `AGENTS.md`
+>   section 8 / `ASTRA_STATUS.md`. The project is at Phase 0 of that plan, with the next
+>   gate being PAPER_TRADING.
+> - The **Directory Structure** below is wrong: `src/` no longer holds the Atlas engine
+>   (it migrated to `core/`), and `src/` now contains only `src/astra/`.
+> - The **₹20,000 → ₹8,25,266 (+4,026%)** figure at the bottom does not reproduce. The
+>   current code gives **₹95,270 (+376.4%)** on the same data; the higher number came from
+>   code with two bugs since fixed. See `research/experiments/EXP-0001.json`.
+>
+> For current state, read `AGENTS.md` → `CLAUDE.md` → `HANDOFF.md` → `ASTRA_STATUS.md`.
+
 Astra is an ML-powered, fully automated trading platform for NSE (India) markets.
 It continuously analyses market conditions, selects the best strategy for the current
 regime, scans the full instrument universe for opportunities, and executes trades
@@ -191,8 +205,8 @@ Your original PivotCPR strategy is **preserved exactly as-is**. The ML layer is 
 
 ### Paper trading (current state)
 ```bash
-cd /workshop/atlas
-source venv/bin/activate
+cd <repo-root>
+source .venv/bin/activate
 python scripts/run_paper.py
 ```
 
@@ -238,8 +252,14 @@ The original Atlas strategy. Two signal types:
 | Regular Breakout | ~4.5% of trades | ~30.5% | 2-candle confirmation through pivot/CPR zone |
 | Momentum Breakout | ~95.5% of trades | ~20% | Single explosive candle — 2 of 3 criteria met |
 
-**Backtest (Feb–Jul 2026):** ₹20,000 → ₹8,25,266 (+4,026%)
-⚠️ *In-sample result — walk-forward validation (Phase 3) required before trusting this number.*
+**Backtest (Feb–Jul 2026):** ₹20,000 → **₹95,270 (+376.4%)**, 532 trades, 32.1% win rate.
+Reproduced 2026-10-13 via `python scripts/exp_0001_reproduce.py`; matches
+`research/experiments/EXP-0001.json` exactly.
+
+⚠️ *The previously published ₹8,25,266 (+4,026%) figure was produced by code containing two
+bugs (options pricer and stop geometry), both since fixed. Do not cite it.*
+⚠️ *Still an in-sample result on 6 months of data — the walk-forward and Monte Carlo gates were
+cleared on the separate 2023-2025 dataset, not on this one.*
 
 ---
 

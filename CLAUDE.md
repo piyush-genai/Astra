@@ -30,7 +30,7 @@
 ## Repository Layout
 
 ```
-/workshop/atlas/
+<repo-root>/                  ← clone location is not baked in anywhere
 │
 ├── AGENTS.md              ← Agent constitution (read first)
 ├── CLAUDE.md              ← This file
@@ -71,19 +71,25 @@
 │   ├── risk/              ← Risk policy + live trading gates
 │   └── decisions/         ← Architecture decision log
 │
-├── configs/
-│   ├── development/       ← Local dev config
-│   ├── research/          ← Research/backtest config
-│   ├── paper/             ← Paper trading config
-│   ├── shadow/            ← Shadow trading config
-│   └── production/        ← Live trading config (NEVER in notebooks)
+├── config/                ← ACTUAL: three flat YAMLs, no env separation yet
+│   ├── instruments.yaml
+│   ├── risk.yaml          ← read by BOTH paper and live paths
+│   └── ml.yaml
 │
 └── tests/                 ← 92 tests, all passing
 ```
 
+**Config layout is aspirational in AGENTS.md and not yet built.** AGENTS.md section 6 names
+`configs/production/risk.yaml` as the home of risk limits; no `configs/` directory exists.
+`core/config_loader.py` reads the flat `config/` shown above, so there is currently no
+separation between paper and production risk limits. Creating that separation is an
+architecture change — AGENTS.md section 13 requires human approval before it is made.
+
 ---
 
 ## Development Commands
+
+All commands assume the venv is active and are run from the repo root.
 
 ```bash
 # Tests (always run before committing)
@@ -96,6 +102,10 @@ python3 scripts/run_paper.py --strategy pivot_cpr --duration 390
 
 # Backtest
 python3 scripts/run_backtest.py
+
+# Data integrity (run before any experiment or paper session)
+python3 scripts/verify_data.py              # exit 0 only if all datasets pass
+python3 scripts/verify_data.py --record-checksums   # stamp trusted files into the manifest
 
 # Type checking (if mypy is installed)
 mypy core/ strategies/ --ignore-missing-imports
@@ -115,7 +125,7 @@ src/astra/      → new home for ASTRA; imports from core/ during migration
 
 **Strategies never call the broker.**
 **ExecutionEngine is the ONLY module that imports from core/broker.**
-**Risk limits live in configs/ — never hardcoded.**
+**Risk limits live in config/ YAML — never hardcoded.**
 
 ### Money Safety Rules
 1. `dry_run=True` is the default in ExecutionEngine — must be explicitly overridden

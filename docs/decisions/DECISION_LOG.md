@@ -22,6 +22,11 @@ destroys value. Preserve first, improve second.
 
 **Outcome**: Git tagged as `atlas-baseline-v1`.
 
+*Correction 2026-10-13*: this outcome was recorded but never carried out — no tags existed in
+the repository. The tag now exists, created at `27e6a6c` (the commit `EXP-0001.json` records as
+`git_commit`, i.e. the code that produced the reproduced baseline result). It is annotated and
+local until pushed.
+
 ---
 
 ## DECISION-002 — 2026-10-10: Claude Code + Claude Pro as Primary Agent
@@ -100,6 +105,158 @@ discovery + capital scaling, not through targeting a return number in backtests.
 - Good: 3–8%/month (sustainable, scalable)
 - Excellent: 8–15%/month (exceptional, investigate deeply before scaling)
 - Extraordinary: > 15%/month (extraordinary skepticism required; survive 3+ untouched test periods)
+
+---
+
+## DECISION-007 — 2026-10-13: Lot Manager Built But Deliberately Unwired
+
+**Context**: TASK-5 (HANDOFF.md section 8) requires the lot-cap growth rule and step-down
+drawdown tiers to exist before paper trading, so paper sizing matches the EXP-0017
+projections. Implementing it means writing position-sizing logic, which AGENTS.md section 13
+puts behind human approval.
+
+**Decision**: Implement the full rule as a pure, deterministic, fully tested module at
+`src/astra/risk/lot_manager.py` (41 tests), and wire it into nothing. No execution path
+imports it. Activation is a separate, explicit decision.
+
+**Rationale**: Splitting "write the rule" from "let the rule size real orders" delivers the
+reviewable artifact without an agent self-authorizing a change to the risk plane. The module
+is inert, so it cannot affect a paper or live run until a human connects it. AGENTS.md
+section 6 also requires that risk behaviour be deterministic — the module is a pure function
+of capital state, with no ML or model input.
+
+**Impact**: TASK-5's logic is available and verified in isolation. It is NOT validated
+end-to-end against a backtest, because EXP-0017 cannot be re-run while the 2023-2025 data is
+absent (RISK-0). Three open items are now documented in code rather than lost:
+- the drawdown multiplier applies to the lot cap, not the capital term (see DECISION-008)
+- per-trade HWM marking introduces a tax-withholding artifact (see DECISION-009)
+- the validated sizing exceeds config/risk.yaml, so the module refuses to build (DECISION-010)
+
+**Review trigger**: Before the first paper session using ASTRA sizing. Wiring it requires a
+new decision entry here.
+
+---
+
+## DECISION-008 — 2026-10-13: Drawdown Multiplier Scales the Lot Cap (PROPOSED)
+
+**Status**: PROPOSED — needs human confirmation, ideally by re-running EXP-0017.
+
+**Context**: The sizing formula is written three times in the docs, and all three forms apply
+the drawdown multiplier to the capital term:
+
+    HANDOFF/ASTRA_STATUS:  lots = min(floor(net_capital × 0.30 / premium × dd_mult), cap)
+    CLAUDE.md:             lots = min(floor(net_capital × 0.30 / premium) × dd_mult, cap)
+
+Neither reproduces EXP-0017's own recorded narrative, which states "7 lots at 0.35x tier
+(step-down: 0.35x × 20 = 7 lots max)" and "recovered to 1.00x → 20 lots restored". When the
+capital term exceeds the cap, both written forms clamp to the unscaled cap and return 20.
+They can never return 7.
+
+**Decision (proposed)**: The implementation that produced the validated results must have
+applied the multiplier to the cap: `effective_cap = floor(max_lots_cap × dd_mult)`, then
+`lots = min(capital_lots, effective_cap)`. This reconciles 0.35 × 20 = 7, the 0.12x tier
+bottoming at 2, and April 2025 running at 25 lots. `lot_manager.py` defaults to this
+(`DrawdownApplication.CAP_SCALED`) and retains the documented form as `CAPITAL_SCALED` so the
+two can be compared directly.
+
+**Rationale**: Between a formula written in prose and a numeric result recorded from a run,
+the recorded result is the better evidence of what the code did. The difference is not
+cosmetic: at a 0.35 tier with ample capital it is 7 lots versus 20, a ~3x exposure gap.
+
+**Impact**: All three documents state a formula that cannot reproduce the validated results
+and should be corrected once this is confirmed. Until then, no document should be treated as
+authoritative on the formula.
+
+**Review trigger**: Immediately after the 2023-2025 data is restored and EXP-0017 is re-run.
+
+---
+
+## DECISION-009 — 2026-10-13: HWM Marked at Month Close, Not Per Trade (PROPOSED)
+
+**Status**: PROPOSED — contradicts EXP-0017.json's written recommendation.
+
+**Context**: `EXP-0017.json` recommends "hwm_tracking: Updated after every trade (intraday),
+not monthly. Gives faster recovery recognition." But `exp_0016_compounded_equity.py` — the
+code that actually produced the results — updates the peak only inside `close_month()`, after
+that month's tax has been withheld. The recommendation was never simulated.
+
+Adopting it introduces an artifact. The HWM gets marked on pre-withholding capital mid-month;
+at close, 30% of the month's profit is withheld, dropping net capital below that peak. A month
+earning 50% of capital withholds 15% of it — exactly the 1.00x → 0.65x boundary. A strongly
+profitable month would demote the engine a tier with no loss having occurred.
+
+**Decision (proposed)**: Mark the HWM at month close on post-withholding net capital
+(`HwmMarking.MONTH_CLOSE`, the default), reproducing the validated simulation. `PER_TRADE` is
+retained and documented, but must not be enabled without re-running EXP-0017 to quantify the
+demotion.
+
+**Rationale**: Faithfulness to the run that produced the numbers outranks an unsimulated
+improvement, especially one that silently reduces exposure after good months. Drawdown still
+responds per trade; only the peak is month-stable.
+
+**Impact**: Recovery recognition is slower than EXP-0017 recommended. RISK-8 (no intra-position
+drawdown tracking) is unchanged and still open.
+
+**Review trigger**: Re-run of EXP-0017; or the first paper month showing an unexpected tier change.
+
+---
+
+## DECISION-010 — 2026-10-13: Validated Sizing Exceeds Configured Risk Limits (OPEN — NEEDS HUMAN DECISION)
+
+**Status**: OPEN. No decision made. This is a risk-limit question, which AGENTS.md section 6
+reserves for a human, recorded here, and committed as a config change.
+
+**Context**: The validated EXP-0017 stack and `config/risk.yaml` disagree on two numbers:
+
+| Parameter | EXP-0017 validated design | config/risk.yaml | Ratio |
+|---|---|---|---|
+| Capital deployed per trade | 30% | `max_capital_deployed_pct: 25.0` | 1.2x |
+| Lots per order | 10 (paper) → 20 (live), growing to 25-35 | `hard_cap_lots: 10` | up to 3.5x |
+
+So the validated stack cannot legally run under the current risk config. The ₹49.2L projection
+assumes 30% deployment and caps up to 35 lots; the config permits 25% and 10 lots.
+
+**Options**: (a) raise the config to match the validated design, accepting the measured 44.1%
+max drawdown; (b) keep the config and re-run EXP-0017 at 25%/10 lots to get honest projections
+for what is actually permitted; (c) stage the limits upward across paper → shadow → live.
+
+**Recommendation**: (b) then (c). The ₹49.2L figure is not a projection of the system as
+configured, and raising limits to match a backtest — rather than raising them because
+validated behaviour earned it — is the failure mode AGENTS.md section 14 warns about. Note
+`hard_cap_lots` also carries a standing instruction to verify the NIFTY freeze quantity via
+Upstox before trusting it.
+
+**Impact until resolved**: `LotManagerConfig.from_risk_config()` raises `RiskLimitConflict`
+rather than clamping, so this conflict surfaces at construction instead of silently halving
+exposure mid-run. Two tests pin that behaviour.
+
+**Review trigger**: Before TASK-1 paper wiring. Blocks it.
+
+---
+
+## DECISION-011 — 2026-10-13: Config Environment Separation Deferred (OPEN — NEEDS HUMAN DECISION)
+
+**Status**: OPEN. No change made.
+
+**Context**: AGENTS.md section 6 states "Risk limits live in `configs/production/risk.yaml`"
+and marks the rule NON-NEGOTIABLE. No `configs/` directory exists. There is a flat `config/`
+with `instruments.yaml`, `risk.yaml`, `ml.yaml`, read by `core/config_loader.py`. CLAUDE.md
+documented the five-environment layout as though it existed.
+
+The practical consequence: **paper and live read the same `risk.yaml`.** There is no mechanism
+by which a paper-trading limit change cannot alter live limits, and the separation the
+constitution assumes is absent.
+
+**Decision**: Deferred. Creating `configs/{development,research,paper,shadow,production}/`
+means changing `config_loader.py`, which sits on the live path — an architecture change
+requiring approval under AGENTS.md section 13. CLAUDE.md has been corrected to describe the
+actual layout and flag the gap rather than imply the structure exists.
+
+**Rationale**: Documenting a known gap accurately is safer than an unapproved migration of the
+config loader. But this should not stay open long: the gate sequence reaches SHADOW, where
+paper and live configs coexist and sharing one file becomes actively dangerous.
+
+**Review trigger**: Before the PAPER → SHADOW transition at the latest.
 
 ---
 
