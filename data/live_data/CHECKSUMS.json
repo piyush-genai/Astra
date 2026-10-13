@@ -3,6 +3,18 @@
     "filename": "nifty_5min_20230101_to_20251231.csv",
     "sha256": "830bd8bb6f70d1b43df69d4af7d0d0f46cbdd8bcd8f0bd115d3eedd293c5fa5d",
     "bytes": 3441877,
-    "recorded_at": "2026-10-14T00:32:36.598316+05:30"
+    "recorded_at": "2026-10-14T00:47:16.810151+05:30"
+  },
+  "vix_2023_2025": {
+    "filename": "india_vix_daily_20230101_to_20251231.csv",
+    "sha256": "ddb209c300682272c3332c0f7a8753cc63f89cdf763c101e2e21bda4a5deeff5",
+    "bytes": 23716,
+    "recorded_at": "2026-10-14T00:47:16.810633+05:30"
+  },
+  "nifty_2026": {
+    "filename": "nifty_5min_20260201_to_20260731.csv",
+    "sha256": "f2f64b2fe2762fc18efe7a6888acefa7219ef1a82aee78b676af8ec195ad7dd6",
+    "bytes": 571892,
+    "recorded_at": "2026-10-14T00:47:16.811147+05:30"
   }
 }
